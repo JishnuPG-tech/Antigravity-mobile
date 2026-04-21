@@ -1,0 +1,64 @@
+[
+    {
+        "id": "reg_001_ac_3star",
+        "appliance": "ac",
+        "input": {
+            "ac_hours": 8,
+            "ac_star": 3,
+            "ac_tonnage": 1.5,
+            "ac_type": "split"
+        },
+        "bill": 500,
+        "expected_range": [
+            100,
+            200
+        ],
+        "description": "Standard 1.5 Ton 3-Star AC usage"
+    },
+    {
+        "id": "reg_002_ac_5star",
+        "appliance": "ac",
+        "input": {
+            "ac_hours": 8,
+            "ac_star": 5,
+            "ac_tonnage": 1.5,
+            "ac_type": "split"
+        },
+        "bill": 500,
+        "expected_range": [
+            80,
+            160
+        ],
+        "description": "Efficient 1.5 Ton 5-Star AC usage (Should be lower than 3-star)"
+    },
+    {
+        "id": "reg_003_fridge_old",
+        "appliance": "fridge",
+        "input": {
+            "fridge_capacity": 250,
+            "fridge_age": 12,
+            "fridge_type": "double_door"
+        },
+        "bill": 300,
+        "expected_range": [
+            40,
+            90
+        ],
+        "description": "Old Inefficient Refrigerator"
+    },
+    {
+        "id": "reg_004_fan_standard",
+        "appliance": "ceiling_fan",
+        "input": {
+            "num_fans": 3,
+            "fan_hours": 12,
+            "fan_type": "standard"
+        },
+        "bill": 250,
+        "expected_range": [
+            30,
+            70
+        ],
+        "description": "3 Standard Ceiling Fans running half day"
+    }
+]

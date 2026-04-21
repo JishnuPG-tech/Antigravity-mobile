@@ -1,0 +1,76 @@
+{
+  "timestamp": "2026-04-19 14:19:57",
+  "appliance": "ac",
+  "total_bill": 500.0,
+  "inputs": {
+    "ac_hours_per_day": 8,
+    "ac_star_rating": 3,
+    "ac_tonnage": 1.5,
+    "ac_type": "split",
+    "ac_usage_pattern": "moderate",
+    "n_occupants": 4
+  }
+}
+{
+  "timestamp": "2026-04-19 14:19:57",
+  "appliance": "unknown_gadget",
+  "total_bill": 500.0,
+  "inputs": {}
+}
+{
+  "timestamp": "2026-04-19 15:02:37",
+  "appliance": "ac",
+  "total_bill": 500.0,
+  "inputs": {
+    "ac_hours_per_day": 8,
+    "ac_star_rating": 3,
+    "ac_tonnage": 1.5,
+    "ac_type": "split",
+    "ac_usage_pattern": "moderate",
+    "n_occupants": 4
+  }
+}
+{
+  "timestamp": "2026-04-19 15:02:37",
+  "appliance": "unknown_gadget",
+  "total_bill": 500.0,
+  "inputs": {}
+}
+{
+  "timestamp": "2026-04-20 09:58:51",
+  "appliance": "ac",
+  "total_bill": 500.0,
+  "inputs": {
+    "ac_hours_per_day": 8,
+    "ac_star_rating": 3,
+    "ac_tonnage": 1.5,
+    "ac_type": "split",
+    "ac_usage_pattern": "moderate",
+    "n_occupants": 4
+  }
+}
+{
+  "timestamp": "2026-04-20 09:58:51",
+  "appliance": "unknown_gadget",
+  "total_bill": 500.0,
+  "inputs": {}
+}
+{
+  "timestamp": "2026-04-20 16:35:42",
+  "appliance": "ac",
+  "total_bill": 500.0,
+  "inputs": {
+    "ac_hours_per_day": 8,
+    "ac_star_rating": 3,
+    "ac_tonnage": 1.5,
+    "ac_type": "split",
+    "ac_usage_pattern": "moderate",
+    "n_occupants": 4
+  }
+}
+{
+  "timestamp": "2026-04-20 16:35:44",
+  "appliance": "unknown_gadget",
+  "total_bill": 500.0,
+  "inputs": {}
+}
