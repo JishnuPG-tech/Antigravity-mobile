@@ -1,5 +1,5 @@
-# Use official lightweight Python image
-FROM python:3.9-slim
+# Use an official Python 3.10 slim image which is compatible with recent scikit-learn/pandas
+FROM python:3.10-slim
 
 # Set environment variables to prevent Python from writing pyc files and buffering stdout
 ENV PYTHONDONTWRITEBYTECODE=1
