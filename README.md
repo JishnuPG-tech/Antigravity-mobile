@@ -1,5 +1,12 @@
 # Antigravity Telegram Bridge
 
+---
+title: Antigravity Telegram Bridge
+sdk: docker
+emoji: "🪄"
+license: mit
+---
+
 Production-ready scaffold to control the Antigravity CLI remotely via Telegram.
 
 This repository provides a FastAPI backend, an async Telegram bot, and a session
