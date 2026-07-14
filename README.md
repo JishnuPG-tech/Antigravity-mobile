@@ -1,7 +1,7 @@
 ---
 title: Antigravity Telegram Bridge
 emoji: "🪄"
-colorFrom: deepBlue
+colorFrom: blue
 colorTo: purple
 sdk: docker
 sdk_version: "latest"
