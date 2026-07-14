@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    container_name: antigravity-bridge
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - AUTHORIZED_USERS=${AUTHORIZED_USERS}
+      - WORKSPACE_PATH=${WORKSPACE_PATH:-/workspaces}
+      - UPLOAD_LIMIT=${UPLOAD_LIMIT:-104857600}
+    volumes:
+      - ./workspaces:/workspaces
+      - ./logs:/app/logs
+    ports:
+      - "7860:7860"
+    restart: unless-stopped
+version: '3.8'
+services:
+  antigravity-bot:
+    build: .
+    container_name: antigravity-bot
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./workspaces:/workspaces
+      - ./logs:/logs
+    ports:
+      - "8000:8000"
+    shm_size: '512mb'

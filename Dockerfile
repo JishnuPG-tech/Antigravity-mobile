@@ -1,36 +1,62 @@
-# Use an official Python 3.10 slim image which is compatible with recent scikit-learn/pandas
-FROM python:3.10-slim
+FROM python:3.12-slim
 
-# Set environment variables to prevent Python from writing pyc files and buffering stdout
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+ENV WORKSPACE_PATH=/data/workspaces
 
-# Install system dependencies (if needed for TensorFlow/Scikit-learn)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    tmux \
+    curl \
+    ca-certificates \
+    supervisor \
+    unzip \
+    gcc \
+    make \
+ && rm -rf /var/lib/apt/lists/*
 
-# Set up a new user named "user" with user ID 1000
-# Hugging Face Spaces requires running Docker containers as a non-root user
-RUN useradd -m -u 1000 user
-USER user
-ENV HOME=/home/user \
-    PATH=/home/user/.local/bin:$PATH
+RUN useradd -m -s /bin/bash appuser || true
 
-WORKDIR $HOME/app
+WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
-COPY --chown=user requirements.txt .
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+COPY . /app
+RUN chmod +x /app/scripts/install_antigravity.sh || true
+RUN mkdir -p /data && mkdir -p /data/workspaces && chown -R appuser:appuser /data
 
-# Copy the rest of the application
-COPY --chown=user . $HOME/app
-
-# Expose the API port 7860 for Hugging Face
+# Expose Hugging Face Spaces default port
 EXPOSE 7860
 
-# Command to run the application on Hugging Face port 7860
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
+RUN chmod +x /app/scripts/entrypoint.sh
+
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       curl \
+       ca-certificates \
+       tmux \
+       git \
+       unzip \
+       build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project
+COPY . /app
+
+# Install Antigravity CLI in container (non-interactive)
+RUN chmod +x /app/scripts/install_antigravity.sh && /app/scripts/install_antigravity.sh || true
+
+ENV PATH="/root/.local/bin:${PATH}"
+
+EXPOSE 8000
+
+CMD ["/usr/bin/supervisord", "-c", "/app/config/supervisord.conf"]
