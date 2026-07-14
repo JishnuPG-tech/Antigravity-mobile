@@ -13,6 +13,7 @@ if [ ! -w /data ]; then
     DATA_ROOT="/tmp"
 fi
 
+export PYTHONPATH="/app:${PYTHONPATH:-}"
 export WORKSPACE_PATH="${WORKSPACE_PATH:-$DATA_ROOT/workspaces}"
 mkdir -p "$WORKSPACE_PATH" "$DATA_ROOT/bin" "$DATA_ROOT/logs" 2>/dev/null || true
 
