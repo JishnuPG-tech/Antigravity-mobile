@@ -1,7 +1,8 @@
+from backend.app.handlers import healthz
+
 try:
     from fastapi import FastAPI
     from backend.app.api import router as api_router
-    from backend.app.handlers import healthz
 
     app = FastAPI(title="Antigravity Bridge")
     app.include_router(api_router, prefix="/api")

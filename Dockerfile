@@ -24,7 +24,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app
 RUN chmod +x /app/scripts/install_antigravity.sh /app/scripts/entrypoint.sh || true
-USER appuser
 
 EXPOSE 7860
 
