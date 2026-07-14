@@ -6,6 +6,7 @@ streaming responses. This is a minimal, extensible implementation.
 import asyncio
 import os
 import logging
+import time
 from services.antigravity_manager import AntigravityManager
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
@@ -88,7 +89,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main() -> None:
     token = os.getenv("BOT_TOKEN") or settings.bot_token
     if not token:
-        raise SystemExit("BOT_TOKEN not set")
+        logger.error("BOT_TOKEN not set; Telegram bot will stay idle so the Space can continue starting")
+        while True:
+            time.sleep(60)
+        return
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
@@ -96,7 +100,12 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
     logger.info("Starting Telegram bot")
-    app.run_polling()
+    try:
+        app.run_polling()
+    except Exception:
+        logger.exception("Telegram bot crashed; sleeping before retry")
+        while True:
+            time.sleep(60)
 
 
 if __name__ == "__main__":

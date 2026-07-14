@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
  && rm -rf /var/lib/apt/lists/*
 
+RUN useradd -m -s /bin/bash appuser \
+ && mkdir -p /data/workspaces /data/bin /data/logs \
+ && chown -R appuser:appuser /data
+
 WORKDIR /app
 
 COPY requirements.txt /app/
@@ -20,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app
 RUN chmod +x /app/scripts/install_antigravity.sh /app/scripts/entrypoint.sh || true
-RUN mkdir -p /data/workspaces /data/bin /data/logs
+USER appuser
 
 EXPOSE 7860
 

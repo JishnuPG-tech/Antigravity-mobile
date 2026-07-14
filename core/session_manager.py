@@ -116,11 +116,19 @@ class SessionManager:
 
 if __name__ == "__main__":
     import argparse
+    import logging
     parser = argparse.ArgumentParser()
     parser.add_argument("--watch", action="store_true")
     args = parser.parse_args()
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    logger = logging.getLogger(__name__)
     sm = SessionManager()
-    if args.watch:
-        # Simple watcher loop to recreate sessions if tmux restarts.
+    try:
+        if args.watch:
+            # Simple watcher loop to keep the supervisor process alive.
+            while True:
+                time.sleep(10)
+    except Exception:
+        logger.exception("Session watcher crashed; sleeping before retry")
         while True:
-            time.sleep(10)
+            time.sleep(60)

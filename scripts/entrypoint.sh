@@ -5,7 +5,6 @@ echo "Entrypoint: preparing environment..."
 
 # Ensure /data exists and is writable
 mkdir -p /data /data/workspaces /data/bin /data/logs
-chown -R appuser:appuser /data || true
 
 install_antigravity_async() {
     echo "Installing Antigravity CLI asynchronously..."
