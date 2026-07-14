@@ -1,3 +1,14 @@
+---
+title: Antigravity Telegram Bridge
+emoji: "🪄"
+colorFrom: deepBlue
+colorTo: purple
+sdk: docker
+sdk_version: "latest"
+app_file: app.py
+pinned: false
+---
+
 # Antigravity Telegram Bridge
 
 ---
