@@ -1,0 +1,17 @@
+.git
+.github
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+logs/
+*.log
+tmp/
+/tmp/
+antigravity-cli/
+workspaces/
+/workspaces/
+.vscode/

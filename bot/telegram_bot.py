@@ -18,6 +18,24 @@ logger = logging.getLogger(__name__)
 agy = AntigravityManager()
 
 
+def parse_authorized_users() -> set[int]:
+    raw = settings.authorized_users or os.getenv("AUTHORIZED_USERS", "")
+    users: set[int] = set()
+    for value in [item.strip() for item in raw.split(",") if item.strip()]:
+        try:
+            users.add(int(value))
+        except Exception:
+            continue
+    return users
+
+
+AUTHORIZED_USERS = parse_authorized_users()
+
+
+def is_authorized(user_id: int) -> bool:
+    return bool(AUTHORIZED_USERS) and int(user_id) in AUTHORIZED_USERS
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hello — Antigravity bridge ready.")
 
@@ -76,28 +94,6 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-
-    # Authorization helper
-    def parse_authorized():
-        raw = settings.authorized_users or os.getenv("AUTHORIZED_USERS", "")
-        out = set()
-        for p in [x.strip() for x in raw.split(",") if x.strip()]:
-            try:
-                out.add(int(p))
-            except Exception:
-                continue
-        return out
-
-    AUTHORIZED = parse_authorized()
-
-    def is_authorized(user_id: int) -> bool:
-        # allow if AUTHORIZED is empty (dangerous) or user in set
-        if not AUTHORIZED:
-            return False
-        return int(user_id) in AUTHORIZED
-
-    # Recommended commands
-    app.bot.set_my_commands([BotCommand("start", "Start the bot"), BotCommand("cancel", "Cancel running command")])
 
     logger.info("Starting Telegram bot")
     app.run_polling()

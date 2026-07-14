@@ -5,8 +5,8 @@ This module provides a `SessionManager` class with operations to ensure a
 tmux session exists, send input, and capture output. It uses `tmux` commands
 and `pexpect` for robust interaction.
 """
+import asyncio
 import os
-import shlex
 import subprocess
 import time
 from typing import Optional
