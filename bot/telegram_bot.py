@@ -8,6 +8,7 @@ import os
 import logging
 import time
 import re
+import subprocess
 from services.antigravity_manager import AntigravityManager
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
@@ -39,15 +40,25 @@ def is_authorized(user_id: int) -> bool:
 
 
 def get_control_keyboard():
-    """Generates the inline keyboard for interactive TUI session control."""
+    """Generates the inline keyboard for interactive TUI session control (keypad layout)."""
     keyboard = [
         [
-            InlineKeyboardButton("🛑 Interrupt (Ctrl-C)", callback_data="control_interrupt"),
-            InlineKeyboardButton("🔄 Refresh Screen", callback_data="control_refresh")
+            InlineKeyboardButton("⬆️ Up", callback_data="key_Up"),
         ],
         [
-            InlineKeyboardButton("🚀 Launch agy CLI", callback_data="control_agy"),
-            InlineKeyboardButton("⚙️ Open Config", callback_data="control_config")
+            InlineKeyboardButton("⬅️ Left", callback_data="key_Left"),
+            InlineKeyboardButton("🆗 Enter", callback_data="key_Enter"),
+            InlineKeyboardButton("➡️ Right", callback_data="key_Right"),
+        ],
+        [
+            InlineKeyboardButton("⬇️ Down", callback_data="key_Down"),
+            InlineKeyboardButton("⇥ Tab", callback_data="key_Tab"),
+            InlineKeyboardButton("⌫ Backspace", callback_data="key_BSpace"),
+        ],
+        [
+            InlineKeyboardButton("🛑 Ctrl-C", callback_data="control_interrupt"),
+            InlineKeyboardButton("🔄 Refresh Screen", callback_data="control_refresh"),
+            InlineKeyboardButton("🚀 Launch agy", callback_data="control_agy"),
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -87,7 +98,7 @@ def clean_terminal_output(text: str) -> tuple[str, bool]:
 
     # 2. Strip ANSI escape sequences:
     # OSC 8 hyperlinks (\x1b]8;...)
-    cleaned = re.sub(r'\x1b\]8;[^\x1b\x07]*(?:\x1b\\|\x07)', '', text)
+    cleaned = re.sub(r'\x1b\]8;[^\x1b\x07]*[\x1b\x07]', '', text)
     # Standard SGR / CSI parameters (\x1b[34;4m, \x1b[m, etc.)
     cleaned = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', cleaned)
     # Remaining raw ESC sequences
@@ -168,6 +179,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.application.create_task(streamer())
 
 
+async def refresh_terminal_screen(query, user_id: int):
+    """Captures the current terminal screen state and updates the message inline."""
+    output = agy.read(str(user_id), lines=40)
+    display, is_card = clean_terminal_output(output)
+    
+    if is_card:
+        keyboard = [[InlineKeyboardButton("🔗 Log In (Google)", url=display)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text=(
+                "🔑 *Antigravity Login Required*\n\n"
+                "Please click the button below to authorize, then copy the code and paste it here:"
+            ),
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
+    elif display:
+        code_text = "```\n" + display + "\n```"
+        try:
+            await query.edit_message_text(
+                text=code_text,
+                parse_mode="Markdown",
+                reply_markup=get_control_keyboard()
+            )
+        except Exception as e:
+            if "Message is not modified" not in str(e):
+                logger.error(f"Failed to edit terminal screen: {e}")
+    else:
+        try:
+            await query.edit_message_text(
+                text="`Terminal output is empty.`",
+                parse_mode="Markdown",
+                reply_markup=get_control_keyboard()
+            )
+        except Exception:
+            pass
+
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Processes button presses from the control keyboard."""
     query = update.callback_query
@@ -181,47 +230,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = query.data
     logger.info(f"handle_callback: user {user_id} triggered action {action}")
     
-    if action == "control_interrupt":
+    if action.startswith("key_"):
+        key_name = action.split("_")[1]
+        try:
+            session = agy.sm._session_name(str(user_id))
+            # Send key directly to the tmux session
+            subprocess.run(["tmux", "send-keys", "-t", session, key_name], check=True)
+            # Yield event loop for tmux to process and redraw
+            await asyncio.sleep(0.15)
+            await refresh_terminal_screen(query, user_id)
+        except Exception as e:
+            logger.error(f"Error sending key {key_name} to tmux: {e}")
+            
+    elif action == "control_interrupt":
         agy.sm.interrupt(str(user_id))
         await query.message.reply_text("🛑 Sent Interrupt (Ctrl-C) to your session.")
+        await asyncio.sleep(0.15)
+        await refresh_terminal_screen(query, user_id)
         
     elif action == "control_refresh":
-        output = agy.read(str(user_id), lines=50)
-        display, is_card = clean_terminal_output(output)
-        
-        if is_card:
-            keyboard = [[InlineKeyboardButton("🔗 Log In (Google)", url=display)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                text=(
-                    "🔑 *Antigravity Login Required*\n\n"
-                    "Please click the button below to authorize, then copy the code and paste it here:"
-                ),
-                parse_mode="Markdown",
-                reply_markup=reply_markup
-            )
-        elif display:
-            code_text = "```\n" + display + "\n```"
-            await query.edit_message_text(
-                text=code_text,
-                parse_mode="Markdown",
-                reply_markup=get_control_keyboard()
-            )
-        else:
-            await query.edit_message_text(
-                text="`Terminal output is empty.`",
-                parse_mode="Markdown",
-                reply_markup=get_control_keyboard()
-            )
+        await refresh_terminal_screen(query, user_id)
             
     elif action == "control_agy":
         agy.start_for_user(str(user_id))
         agy.send_command(str(user_id), "agy")
         await query.message.reply_text("🚀 Sent launch command: 'agy'")
+        await asyncio.sleep(0.3)
+        await refresh_terminal_screen(query, user_id)
         
     elif action == "control_config":
         agy.send_command(str(user_id), "/config")
         await query.message.reply_text("⚙️ Sent command: '/config'")
+        await asyncio.sleep(0.3)
+        await refresh_terminal_screen(query, user_id)
 
 
 # Global application reference for async execution
