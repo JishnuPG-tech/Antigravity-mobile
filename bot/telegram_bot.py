@@ -2,6 +2,8 @@
 
 The bot forwards messages and files to the FastAPI backend and displays
 streaming responses with a fully interactive menu for remote control.
+It also serves as a Cloud Storage bridge, saving uploaded files to the
+user's workspace and allowing users to list/download files over chat.
 """
 import asyncio
 import os
@@ -77,7 +79,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "👋 *Antigravity Mobile Terminal Ready.*\n\n"
-        "Click the button below to open your fully interactive Web Console directly inside Telegram!",
+        "• Click the button below to open your fully interactive Web Console.\n"
+        "• Upload any document/file/photo to save it directly to your workspace.\n"
+        "• Use `/list` to view your workspace files, and `/download <filename>` to retrieve them.",
         parse_mode="Markdown",
         reply_markup=get_control_keyboard(str(user_id))
     )
@@ -90,6 +94,61 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     agy.sm.interrupt(str(user_id))
     await update.message.reply_text("Interrupted.")
+
+
+async def list_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lists all files in the user's workspace."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        await update.message.reply_text("Unauthorized.")
+        return
+        
+    project = "default"
+    ws = os.path.join(agy.sm.workspace_root, f"user_{user_id}", project)
+    os.makedirs(ws, exist_ok=True)
+    
+    files = [f for f in os.listdir(ws) if os.path.isfile(os.path.join(ws, f))]
+    if not files:
+        await update.message.reply_text("📁 Your workspace directory is currently empty.")
+        return
+        
+    file_list = "\n".join([f"• `{name}`" for name in files if not name.startswith(".")])
+    await update.message.reply_text(
+        f"📁 *Workspace Files (Cloud Storage):*\n\n{file_list}\n\n"
+        f"To retrieve a file, type `/download <filename>`",
+        parse_mode="Markdown"
+    )
+
+
+async def download_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Uploads a requested file from the workspace to the Telegram chat."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        await update.message.reply_text("Unauthorized.")
+        return
+        
+    if not context.args:
+        await update.message.reply_text("Usage: `/download <filename>`", parse_mode="Markdown")
+        return
+        
+    filename = " ".join(context.args)
+    # Prevent path traversal attacks
+    filename = os.path.basename(filename)
+    
+    project = "default"
+    ws = os.path.join(agy.sm.workspace_root, f"user_{user_id}", project)
+    file_path = os.path.join(ws, filename)
+    
+    if not os.path.exists(file_path):
+        await update.message.reply_text(f"❌ File `{filename}` not found in your workspace.", parse_mode="Markdown")
+        return
+        
+    await update.message.reply_text(f"📤 Uploading `{filename}`...")
+    try:
+        with open(file_path, 'rb') as f:
+            await update.message.reply_document(document=f, filename=filename)
+    except Exception as e:
+        await update.message.reply_text(f"Error transferring file: {e}")
 
 
 def clean_terminal_output(text: str) -> tuple[str, bool]:
@@ -136,6 +195,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user_id):
         await update.message.reply_text("Unauthorized.")
         return
+
+    project = "default"
+    ws = os.path.join(agy.sm.workspace_root, f"user_{user_id}", project)
+    os.makedirs(ws, exist_ok=True)
+
+    # 1. Handle Incoming Cloud Storage Documents
+    if update.message.document:
+        doc = update.message.document
+        file_name = doc.file_name
+        file_path = os.path.join(ws, file_name)
+        
+        sent_msg = await update.message.reply_text(f"📥 Downloading `{file_name}` to workspace...")
+        try:
+            tg_file = await context.bot.get_file(doc.file_id)
+            await tg_file.download_to_drive(file_path)
+            await sent_msg.edit_text(
+                f"✅ Saved `{file_name}` to workspace.\nYou can now access/run it in the Antigravity CLI!"
+            )
+        except Exception as e:
+            await sent_msg.edit_text(f"❌ Failed to download file: {e}")
+        return
+
+    # 2. Handle Incoming Photos (converts to image file)
+    elif update.message.photo:
+        photo = update.message.photo[-1]
+        file_name = f"uploaded_photo_{int(time.time())}.jpg"
+        file_path = os.path.join(ws, file_name)
+        
+        sent_msg = await update.message.reply_text("📸 Saving image to workspace...")
+        try:
+            tg_file = await context.bot.get_file(photo.file_id)
+            await tg_file.download_to_drive(file_path)
+            await sent_msg.edit_text(
+                f"✅ Saved image as `{file_name}` in workspace.\nCLI has full access to read it!"
+            )
+        except Exception as e:
+            await sent_msg.edit_text(f"❌ Failed to download photo: {e}")
+        return
+
+    # 3. Handle Normal Text Input
     text = update.message.text or ""
 
     # Ensure session exists
@@ -146,7 +245,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Create initial Telegram message and stream updates
     sent = await update.message.reply_text("Running...", reply_markup=get_control_keyboard(str(user_id)))
-
 
     async def streamer():
         try:
@@ -217,7 +315,6 @@ async def refresh_terminal_screen(query, user_id: int):
                 parse_mode="Markdown",
                 reply_markup=get_control_keyboard(str(user_id))
             )
-
         except Exception as e:
             if "Message is not modified" not in str(e):
                 logger.error(f"Failed to edit terminal screen: {e}")
@@ -228,7 +325,6 @@ async def refresh_terminal_screen(query, user_id: int):
                 parse_mode="Markdown",
                 reply_markup=get_control_keyboard(str(user_id))
             )
-
         except Exception:
             pass
 
@@ -303,8 +399,16 @@ async def run_bot_async() -> None:
 
         telegram_app.add_handler(CommandHandler("start", start))
         telegram_app.add_handler(CommandHandler("cancel", cancel))
+        telegram_app.add_handler(CommandHandler("list", list_files))
+        telegram_app.add_handler(CommandHandler("download", download_file))
+        telegram_app.add_handler(CommandHandler("get", download_file))
         telegram_app.add_handler(CallbackQueryHandler(handle_callback))
-        telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+        
+        # Accept text, documents, and photos, excluding commands
+        telegram_app.add_handler(MessageHandler(
+            (filters.TEXT | filters.Document.ALL | filters.PHOTO) & (~filters.COMMAND), 
+            handle_message
+        ))
 
         logger.info("Initializing Telegram bot application...")
         await telegram_app.initialize()
@@ -346,8 +450,15 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(CommandHandler("list", list_files))
+    app.add_handler(CommandHandler("download", download_file))
+    app.add_handler(CommandHandler("get", download_file))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    
+    app.add_handler(MessageHandler(
+        (filters.TEXT | filters.Document.ALL | filters.PHOTO) & (~filters.COMMAND), 
+        handle_message
+    ))
 
     logger.info("Starting Telegram bot")
     try:
