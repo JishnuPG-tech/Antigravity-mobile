@@ -17,6 +17,13 @@ export PYTHONPATH="/app:${PYTHONPATH:-}"
 export WORKSPACE_PATH="${WORKSPACE_PATH:-$DATA_ROOT/workspaces}"
 mkdir -p "$WORKSPACE_PATH" "$DATA_ROOT/bin" "$DATA_ROOT/logs" 2>/dev/null || true
 
+# Pre-configure Antigravity CLI theme to avoid interactive color-scheme prompt
+mkdir -p /root/.gemini/antigravity-cli /home/appuser/.gemini/antigravity-cli 2>/dev/null || true
+echo '{"colorScheme": "dark"}' > /root/.gemini/antigravity-cli/settings.json || true
+echo '{"colorScheme": "dark"}' > /home/appuser/.gemini/antigravity-cli/settings.json || true
+chown -R appuser:appuser /home/appuser/.gemini 2>/dev/null || true
+
+
 install_antigravity_async() {
     echo "Installing Antigravity CLI asynchronously..."
     if curl -fsSL https://antigravity.google/cli/install.sh -o /tmp/install.sh; then
