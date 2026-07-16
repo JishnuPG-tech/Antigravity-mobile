@@ -7,6 +7,7 @@ import asyncio
 import os
 import logging
 import time
+import re
 from services.antigravity_manager import AntigravityManager
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
@@ -50,6 +51,41 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Interrupted.")
 
 
+def clean_terminal_output(text: str) -> tuple[str, bool]:
+    # Look for Google OAuth URL
+    match = re.search(r'https://accounts\.google\.com/o/oauth2/auth\?[^\s\'"\x1b\\>]+', text)
+    if match:
+        auth_url = match.group(0)
+        # Clean up trailing control codes/spaces from the URL
+        auth_url = re.split(r'[\x00-\x1f\x7f-\x9f\s\[\]]', auth_url)[0]
+        auth_url = auth_url.rstrip(']').rstrip('[m').rstrip(';').rstrip('\\')
+        
+        # Ensure we match a clean, fully-formed URL
+        url_match = re.search(r'(https://accounts\.google\.com/o/oauth2/auth\?[a-zA-Z0-9_\-=\+%\.&]+)', auth_url)
+        if url_match:
+            auth_url = url_match.group(1)
+
+        card = (
+            "🔑 *Antigravity Login Required*\n\n"
+            "To authorize your account, please click the link below:\n\n"
+            f"👉 [Click here to Login]({auth_url})\n\n"
+            "After logging in, copy the authorization code from your browser and paste it here."
+        )
+        return card, True
+
+    # Strip ANSI escape sequences:
+    # 1. Strip OSC 8 hyperlinks (\x1b]8;...)
+    cleaned = re.sub(r'\x1b\]8;[^\x1b\x07]*[\x1b\x07]', '', text)
+    # 2. Strip standard SGR parameters (\x1b[34;4m, \x1b[m, etc.)
+    cleaned = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', cleaned)
+    # 3. Strip any leftover control sequences
+    cleaned = cleaned.replace('\x1b]8;;', '').replace('\x1b\\', '').replace('\x1b', '')
+    # 4. Clean up any weird leftovers
+    cleaned = re.sub(r'\[[0-9;]*[a-zA-Z]', '', cleaned)
+    
+    return cleaned.strip(), False
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id):
@@ -69,14 +105,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def streamer():
         try:
             async for chunk in agy.sm.stream_output(str(user_id)):
-                # update the message with the latest chunk appended
                 try:
-                    # keep message reasonably sized
-                    display = chunk
-                    if len(display) > 3500:
-                        display = display[-3500:]
-                    code_text = "```\n" + display + "\n```"
-                    await context.bot.edit_message_text(chat_id=sent.chat_id, message_id=sent.message_id, text=code_text, parse_mode="Markdown")
+                    display, is_card = clean_terminal_output(chunk)
+                    if not display:
+                        continue
+                    
+                    if is_card:
+                        # Markdown text with clickable link
+                        await context.bot.edit_message_text(
+                            chat_id=sent.chat_id,
+                            message_id=sent.message_id,
+                            text=display,
+                            parse_mode="Markdown",
+                            disable_web_page_preview=True
+                        )
+                    else:
+                        # Wrap standard terminal output in a code block
+                        if len(display) > 3500:
+                            display = display[-3500:]
+                        code_text = "```\n" + display + "\n```"
+                        await context.bot.edit_message_text(
+                            chat_id=sent.chat_id,
+                            message_id=sent.message_id,
+                            text=code_text,
+                            parse_mode="Markdown"
+                        )
                 except Exception:
                     pass
         except asyncio.CancelledError:
@@ -84,6 +137,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # spawn background task
     context.application.create_task(streamer())
+
 
 
 # Global application reference for async execution
