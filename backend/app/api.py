@@ -89,3 +89,22 @@ async def ping_url(url: str = "https://www.google.com"):
         return {"error": type(e).__name__, "message": str(e)}
 
 
+@router.get("/debug/install-log")
+async def get_install_log():
+    # Check potential log paths
+    paths = [
+        "/data/logs/antigravity-install.log",
+        "/tmp/logs/antigravity-install.log",
+        "/tmp/antigravity-install.log"
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", errors="replace") as f:
+                    return {"log": f.read()}
+            except Exception as e:
+                return {"error": f"Failed to read {path}: {str(e)}"}
+    return {"error": "Installation log file not found."}
+
+
+
