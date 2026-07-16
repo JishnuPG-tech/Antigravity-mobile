@@ -91,28 +91,35 @@ telegram_app = None
 
 async def run_bot_async() -> None:
     global telegram_app
-    token = os.getenv("BOT_TOKEN") or settings.bot_token
-    if not token:
-        logger.warning("BOT_TOKEN not set; Telegram bot listener is idle")
-        return
+    logger.info("run_bot_async: starting bot initialization task...")
+    try:
+        token = os.getenv("BOT_TOKEN") or settings.bot_token
+        if not token:
+            logger.warning("BOT_TOKEN environment variable not set. Telegram bot will not start.")
+            return
 
-    base_url = os.getenv("TELEGRAM_BASE_URL")
-    if base_url:
-        logger.info(f"Using custom Telegram base URL: {base_url}")
-        telegram_app = ApplicationBuilder().token(token).base_url(base_url).build()
-    else:
-        telegram_app = ApplicationBuilder().token(token).build()
+        base_url = os.getenv("TELEGRAM_BASE_URL")
+        if base_url:
+            logger.info(f"Using custom Telegram base URL: {base_url}")
+            telegram_app = ApplicationBuilder().token(token).base_url(base_url).build()
+        else:
+            logger.info("Using default Telegram API URL (api.telegram.org)")
+            telegram_app = ApplicationBuilder().token(token).build()
 
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("cancel", cancel))
-    telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+        telegram_app.add_handler(CommandHandler("start", start))
+        telegram_app.add_handler(CommandHandler("cancel", cancel))
+        telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    logger.info("Initializing Telegram bot...")
-    await telegram_app.initialize()
-    logger.info("Starting Telegram bot...")
-    await telegram_app.start()
-    logger.info("Starting polling...")
-    await telegram_app.updater.start_polling()
+        logger.info("Initializing Telegram bot application...")
+        await telegram_app.initialize()
+        logger.info("Starting Telegram bot application...")
+        await telegram_app.start()
+        logger.info("Starting Telegram bot polling...")
+        await telegram_app.updater.start_polling()
+        logger.info("Telegram bot is running and actively polling!")
+    except Exception as e:
+        logger.error(f"FATAL ERROR starting Telegram bot: {e}", exc_info=True)
+
 
 
 async def stop_bot_async() -> None:
