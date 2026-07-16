@@ -17,6 +17,10 @@ class SendInputReq(BaseModel):
 class InterruptReq(BaseModel):
     user_id: int
 
+class SendKeyReq(BaseModel):
+    user_id: int
+    key: str
+
 
 @router.post("/sessions/new")
 async def new_session(req: CreateSessionReq):
@@ -67,7 +71,20 @@ async def interrupt_session(req: InterruptReq):
     return {"status": "interrupted"}
 
 
+@router.post("/sessions/key")
+async def send_key(req: SendKeyReq):
+    sm = SessionManager(settings)
+    try:
+        session = sm._session_name(str(req.user_id))
+        import subprocess
+        subprocess.run(["tmux", "send-keys", "-t", session, req.key], check=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "key_sent"}
+
+
 import httpx
+
 
 @router.get("/debug/ping-telegram")
 async def ping_telegram():

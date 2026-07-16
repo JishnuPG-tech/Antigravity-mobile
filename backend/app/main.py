@@ -18,7 +18,9 @@ async def lifespan(app):
 
 try:
     from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse
     from backend.app.api import router as api_router
+    from backend.app.webapp_html import HTML_CONTENT
 
     app = FastAPI(title="Antigravity Bridge", lifespan=lifespan)
     app.include_router(api_router, prefix="/api")
@@ -28,8 +30,12 @@ try:
         return {
             "status": "ok",
             "service": "Antigravity Bridge",
-            "routes": ["/healthz", "/docs", "/api/sessions/new"],
+            "routes": ["/healthz", "/docs", "/api/sessions/new", "/webapp"],
         }
+
+    @app.get("/webapp", response_class=HTMLResponse)
+    async def get_webapp():
+        return HTML_CONTENT
 
     @app.get("/healthz")
     async def health():

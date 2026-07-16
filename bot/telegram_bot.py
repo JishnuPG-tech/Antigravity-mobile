@@ -10,7 +10,7 @@ import time
 import re
 import subprocess
 from services.antigravity_manager import AntigravityManager
-from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from backend.app.config import settings
@@ -39,9 +39,15 @@ def is_authorized(user_id: int) -> bool:
     return bool(AUTHORIZED_USERS) and int(user_id) in AUTHORIZED_USERS
 
 
-def get_control_keyboard():
+def get_control_keyboard(user_id: str):
     """Generates the inline keyboard for interactive TUI session control (keypad layout)."""
+    base_domain = os.getenv("RENDER_EXTERNAL_URL", "https://antigravity-mobile-00wz.onrender.com")
+    webapp_url = f"{base_domain}/webapp?user_id={user_id}"
+    
     keyboard = [
+        [
+            InlineKeyboardButton("🖥️ Open Web Console", web_app=WebAppInfo(url=webapp_url))
+        ],
         [
             InlineKeyboardButton("⬆️ Up", callback_data="key_Up"),
         ],
@@ -65,9 +71,15 @@ def get_control_keyboard():
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        await update.message.reply_text("Unauthorized.")
+        return
     await update.message.reply_text(
-        "Hello — Antigravity bridge ready.",
-        reply_markup=get_control_keyboard()
+        "👋 *Antigravity Mobile Terminal Ready.*\n\n"
+        "Click the button below to open your fully interactive Web Console directly inside Telegram!",
+        parse_mode="Markdown",
+        reply_markup=get_control_keyboard(str(user_id))
     )
 
 
@@ -133,7 +145,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     agy.send_command(str(user_id), text)
 
     # Create initial Telegram message and stream updates
-    sent = await update.message.reply_text("Running...", reply_markup=get_control_keyboard())
+    sent = await update.message.reply_text("Running...", reply_markup=get_control_keyboard(str(user_id)))
+
 
     async def streamer():
         try:
@@ -168,8 +181,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             message_id=sent.message_id,
                             text=code_text,
                             parse_mode="Markdown",
-                            reply_markup=get_control_keyboard()
+                            reply_markup=get_control_keyboard(str(user_id))
                         )
+
                 except Exception:
                     pass
         except asyncio.CancelledError:
@@ -201,8 +215,9 @@ async def refresh_terminal_screen(query, user_id: int):
             await query.edit_message_text(
                 text=code_text,
                 parse_mode="Markdown",
-                reply_markup=get_control_keyboard()
+                reply_markup=get_control_keyboard(str(user_id))
             )
+
         except Exception as e:
             if "Message is not modified" not in str(e):
                 logger.error(f"Failed to edit terminal screen: {e}")
@@ -211,8 +226,9 @@ async def refresh_terminal_screen(query, user_id: int):
             await query.edit_message_text(
                 text="`Terminal output is empty.`",
                 parse_mode="Markdown",
-                reply_markup=get_control_keyboard()
+                reply_markup=get_control_keyboard(str(user_id))
             )
+
         except Exception:
             pass
 
