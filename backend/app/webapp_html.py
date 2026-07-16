@@ -1,22 +1,57 @@
 HTML_CONTENT = r"""<!DOCTYPE html>
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Antigravity Web Console</title>
+    <title>Antigravity Console</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-gradient: radial-gradient(circle at top, #141419, #08080a);
-            --card-bg: rgba(22, 22, 28, 0.75);
-            --card-border: rgba(56, 56, 74, 0.5);
-            --accent-green: #39FF14;
-            --accent-blue: #00E5FF;
-            --accent-red: #FF3366;
-            --text-primary: #E2E2E9;
+            /* Theme Green Matrix (default) */
+            --bg-base: #050507;
+            --term-bg: #020203;
+            --text-color: #39FF14;
+            --accent-color: #39FF14;
+            --border-color: rgba(57, 255, 20, 0.25);
+            --panel-bg: rgba(2, 2, 3, 0.85);
+            --btn-bg: rgba(57, 255, 20, 0.05);
+            
             --text-secondary: #8E8E9F;
-            --term-bg: #09090b;
+            --accent-red: #FF3366;
+            --card-border: rgba(56, 56, 74, 0.5);
+        }
+
+        /* Tokyo Night Theme */
+        [data-theme="tokyo"] {
+            --bg-base: #1a1b26;
+            --term-bg: #16161e;
+            --text-color: #7aa2f7;
+            --accent-color: #bb9af3;
+            --border-color: #292e42;
+            --panel-bg: rgba(22, 22, 30, 0.85);
+            --btn-bg: rgba(187, 154, 243, 0.08);
+        }
+
+        /* Solarized Dark Theme */
+        [data-theme="solarized"] {
+            --bg-base: #002b36;
+            --term-bg: #073642;
+            --text-color: #93a1a1;
+            --accent-color: #2aa198;
+            --border-color: #586e75;
+            --panel-bg: rgba(7, 54, 66, 0.85);
+            --btn-bg: rgba(42, 161, 152, 0.08);
+        }
+
+        /* Amber CRT Theme */
+        [data-theme="amber"] {
+            --bg-base: #0c0700;
+            --term-bg: #060300;
+            --text-color: #FFB000;
+            --accent-color: #FFB000;
+            --border-color: #3d2a00;
+            --panel-bg: rgba(6, 3, 0, 0.85);
+            --btn-bg: rgba(255, 176, 0, 0.05);
         }
 
         * {
@@ -29,13 +64,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
         body {
             font-family: 'Outfit', sans-serif;
-            background: var(--bg-gradient);
-            color: var(--text-primary);
+            background: var(--bg-base);
+            color: var(--text-color);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
             padding: 12px;
+            transition: background 0.3s, color 0.3s;
         }
 
         header {
@@ -54,9 +90,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .logo-dot {
             width: 10px;
             height: 10px;
-            background-color: var(--accent-blue);
+            background-color: var(--accent-color);
             border-radius: 50%;
-            box-shadow: 0 0 10px var(--accent-blue);
+            box-shadow: 0 0 10px var(--accent-color);
             animation: pulse 2s infinite;
         }
 
@@ -64,19 +100,38 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             font-size: 1.25rem;
             font-weight: 800;
             letter-spacing: -0.5px;
-            background: linear-gradient(135deg, #FFF, var(--text-secondary));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #FFF;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-action {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-action:active {
+            background: rgba(255, 255, 255, 0.1);
         }
 
         .status-badge {
             font-size: 0.75rem;
             font-weight: 600;
-            padding: 4px 10px;
+            padding: 6px 12px;
             border-radius: 20px;
-            background: rgba(57, 255, 20, 0.15);
-            color: var(--accent-green);
-            border: 1px solid rgba(57, 255, 20, 0.3);
+            background: rgba(57, 255, 20, 0.1);
+            color: #39FF14;
+            border: 1px solid rgba(57, 255, 20, 0.2);
             display: flex;
             align-items: center;
             gap: 6px;
@@ -85,7 +140,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .status-dot {
             width: 6px;
             height: 6px;
-            background-color: var(--accent-green);
+            background-color: #39FF14;
             border-radius: 50%;
         }
 
@@ -94,13 +149,27 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             flex: 1;
             display: flex;
             flex-direction: column;
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
             border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            position: relative;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            transition: border-color 0.3s;
+        }
+
+        /* CRT Scanline Visual Effect Overlay */
+        .scanlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 4px;
+            opacity: 0.04;
+            pointer-events: none;
+            z-index: 99;
         }
 
         /* Terminal Window */
@@ -114,7 +183,24 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-all;
-            border-bottom: 1px solid var(--card-border);
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-color);
+            transition: background-color 0.3s, color 0.3s, border-bottom 0.3s;
+        }
+
+        /* Blinking Terminal Cursor */
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background-color: var(--text-color);
+            margin-left: 2px;
+            vertical-align: middle;
+            animation: blink 1s step-start infinite;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
         }
 
         /* Custom Scrollbar */
@@ -125,7 +211,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             background: var(--term-bg);
         }
         .terminal-window::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.06);
             border-radius: 3px;
         }
 
@@ -149,6 +235,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         .login-title {
             font-size: 1.2rem;
             font-weight: 600;
+            color: #FFF;
         }
 
         .login-desc {
@@ -160,19 +247,18 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
         .btn-login {
             display: inline-block;
-            background: linear-gradient(135deg, var(--accent-blue), #00A8FF);
+            background: var(--accent-color);
             color: #000;
             font-weight: 600;
             padding: 12px 28px;
             border-radius: 30px;
             text-decoration: none;
-            box-shadow: 0 4px 15px rgba(0, 229, 255, 0.4);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
             transition: transform 0.2s, box-shadow 0.2s;
         }
 
         .btn-login:active {
             transform: scale(0.95);
-            box-shadow: 0 2px 8px rgba(0, 229, 255, 0.2);
         }
 
         /* Keyboard Layout */
@@ -181,7 +267,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             display: flex;
             flex-direction: column;
             gap: 10px;
-            background: rgba(10, 10, 12, 0.4);
+            background: rgba(0, 0, 0, 0.25);
         }
 
         /* Input Area */
@@ -192,10 +278,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
         .text-input {
             flex: 1;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
             border-radius: 10px;
-            color: var(--text-primary);
+            color: var(--text-color);
             padding: 12px 16px;
             font-family: inherit;
             font-size: 0.95rem;
@@ -204,11 +290,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         .text-input:focus {
-            border-color: var(--accent-blue);
+            border-color: var(--accent-color);
         }
 
         .btn-send {
-            background: var(--text-primary);
+            background: var(--text-color);
             color: #000;
             border: none;
             border-radius: 10px;
@@ -234,9 +320,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         .key-btn {
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid var(--card-border);
-            color: var(--text-primary);
+            background: var(--btn-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
             border-radius: 10px;
             padding: 12px;
             font-family: inherit;
@@ -246,31 +332,22 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: background 0.1s, transform 0.1s;
+            transition: background 0.1s, transform 0.1s, border-color 0.3s;
         }
 
         .key-btn:active {
-            background: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.12);
             transform: scale(0.95);
         }
 
-        .key-btn.double {
-            grid-column: span 2;
-        }
-
         .key-btn.accent-blue {
-            color: var(--accent-blue);
-            border-color: rgba(0, 229, 255, 0.3);
+            color: var(--accent-color);
+            border-color: var(--border-color);
         }
 
         .key-btn.accent-red {
             color: var(--accent-red);
             border-color: rgba(255, 51, 102, 0.3);
-        }
-
-        /* Utilities */
-        .empty-cell {
-            visibility: hidden;
         }
 
         @keyframes pulse {
@@ -291,14 +368,20 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             <div class="logo-dot"></div>
             <h1>Antigravity Console</h1>
         </div>
-        <div class="status-badge" id="status-badge">
-            <div class="status-dot"></div>
-            <span>Connected</span>
+        <div class="header-actions">
+            <button class="btn-action" onclick="cycleTheme()">🎨 Theme</button>
+            <div class="status-badge" id="status-badge">
+                <div class="status-dot"></div>
+                <span>Connected</span>
+            </div>
         </div>
     </header>
 
     <div class="console-container">
-        <div class="terminal-window" id="terminal">Initializing connection...</div>
+        <!-- CRT scanline effect element -->
+        <div class="scanlines"></div>
+        
+        <div class="terminal-window" id="terminal">Initializing connection...<span class="cursor"></span></div>
         
         <div class="control-panel">
             <div class="input-row">
@@ -323,8 +406,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 <button class="key-btn accent-blue" onclick="refresh()">🔄 Refresh</button>
                 
                 <!-- Row 4 -->
-                <button class="key-btn double" onclick="launchAgy()">🚀 Launch agy</button>
-                <button class="key-btn" onclick="sendConfig()">⚙️ Config</button>
+                <button class="key-btn" onclick="navigateHistory(1)">⏮️ Prev Hist</button>
+                <button class="key-btn" onclick="navigateHistory(-1)">⏭️ Next Hist</button>
+                <button class="key-btn accent-blue" onclick="launchAgy()">🚀 Launch agy</button>
             </div>
         </div>
     </div>
@@ -336,6 +420,32 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         const statusBadge = document.getElementById('status-badge');
         const commandInput = document.getElementById('command-input');
         const btnSend = document.getElementById('btn-send');
+
+        // Command History Navigation
+        let history = [];
+        let historyIndex = -1;
+
+        // Dynamic Themes
+        const THEME_KEYS = ['matrix', 'tokyo', 'solarized', 'amber'];
+        let currentThemeIndex = 0;
+
+        function cycleTheme() {
+            triggerHaptic();
+            currentThemeIndex = (currentThemeIndex + 1) % THEME_KEYS.length;
+            const themeKey = THEME_KEYS[currentThemeIndex];
+            if (themeKey === 'matrix') {
+                document.documentElement.removeAttribute('data-theme');
+            } else {
+                document.documentElement.setAttribute('data-theme', themeKey);
+            }
+        }
+
+        // Haptic Feedback trigger
+        function triggerHaptic() {
+            if (navigator.vibrate) {
+                navigator.vibrate(12);
+            }
+        }
 
         if (!userId) {
             terminalEl.innerHTML = '<div class="login-card"><div class="login-icon">⚠️</div><div class="login-title">Missing User ID</div><div class="login-desc">Please open this console directly from the link sent by your Telegram bot.</div></div>';
@@ -353,7 +463,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 authUrl = authUrl.split(/[\\\[\]\s]/)[0]; // strip trailing codes
                 authUrl = authUrl.replace(/\]8;;$/, '').replace(/\\$/, '').replace(/\]8$/, '');
                 
-                // Return structured Login Card HTML
                 return `
 <div class="login-card">
     <div class="login-icon">🔑</div>
@@ -386,19 +495,22 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 const data = await response.json();
                 const cleaned = cleanTerminal(data.output);
                 
-                // Check if it's the login card HTML or raw text
                 if (cleaned.includes('class="login-card"')) {
                     terminalEl.innerHTML = cleaned;
                 } else {
                     terminalEl.textContent = cleaned || "Console screen is blank.";
+                    // Re-append the cursor element
+                    const cursor = document.createElement('span');
+                    cursor.className = 'cursor';
+                    terminalEl.appendChild(cursor);
+                    
                     // Auto scroll to bottom
                     terminalEl.scrollTop = terminalEl.scrollHeight;
                 }
                 
-                // Update badge status
                 statusBadge.innerHTML = '<div class="status-dot"></div><span>Connected</span>';
-                statusBadge.style.borderColor = 'rgba(57, 255, 20, 0.3)';
-                statusBadge.style.color = 'var(--accent-green)';
+                statusBadge.style.borderColor = 'rgba(57, 255, 20, 0.2)';
+                statusBadge.style.color = '#39FF14';
             } catch (err) {
                 console.error(err);
                 statusBadge.innerHTML = '<div class="status-dot" style="background-color: var(--accent-red)"></div><span>Offline</span>';
@@ -411,6 +523,11 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             const text = commandInput.value.trim();
             if (!text || !userId) return;
             
+            // History management
+            history.unshift(text);
+            if (history.length > 50) history.pop();
+            historyIndex = -1;
+
             commandInput.value = "";
             try {
                 await fetch('/api/sessions/send', {
@@ -425,6 +542,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         async function sendKey(key) {
+            triggerHaptic();
             if (!userId) return;
             try {
                 await fetch('/api/sessions/key', {
@@ -439,6 +557,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         async function interrupt() {
+            triggerHaptic();
             if (!userId) return;
             try {
                 await fetch('/api/sessions/interrupt', {
@@ -453,15 +572,14 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         async function launchAgy() {
+            triggerHaptic();
             if (!userId) return;
             try {
-                // Ensure session exists
                 await fetch('/api/sessions/new', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: parseInt(userId), project: "default" })
                 });
-                // Send launch key
                 await fetch('/api/sessions/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -473,17 +591,18 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             }
         }
 
-        async function sendConfig() {
-            if (!userId) return;
-            try {
-                await fetch('/api/sessions/send', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: parseInt(userId), text: "/config" })
-                });
-                setTimeout(refresh, 300);
-            } catch (err) {
-                console.error(err);
+        function navigateHistory(direction) {
+            triggerHaptic();
+            if (history.length === 0) return;
+            
+            historyIndex += direction;
+            if (historyIndex < -1) historyIndex = history.length - 1;
+            if (historyIndex >= history.length) historyIndex = -1;
+
+            if (historyIndex === -1) {
+                commandInput.value = "";
+            } else {
+                commandInput.value = history[historyIndex];
             }
         }
 
@@ -496,10 +615,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         
         btnSend.addEventListener('click', sendCommand);
 
-        // Start polling loop
         if (userId) {
             refresh();
-            setInterval(refresh, 2000); // Poll every 2 seconds
+            setInterval(refresh, 2000);
         }
     </script>
 </body>
