@@ -1,7 +1,7 @@
 """Async Telegram bot bridge to Antigravity backend.
 
 The bot forwards messages and files to the FastAPI backend and displays
-streaming responses. This is a minimal, extensible implementation.
+streaming responses with a fully interactive menu for remote control.
 """
 import asyncio
 import os
@@ -9,8 +9,8 @@ import logging
 import time
 import re
 from services.antigravity_manager import AntigravityManager
-from telegram import Update, BotCommand
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from backend.app.config import settings
 
@@ -38,8 +38,26 @@ def is_authorized(user_id: int) -> bool:
     return bool(AUTHORIZED_USERS) and int(user_id) in AUTHORIZED_USERS
 
 
+def get_control_keyboard():
+    """Generates the inline keyboard for interactive TUI session control."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🛑 Interrupt (Ctrl-C)", callback_data="control_interrupt"),
+            InlineKeyboardButton("🔄 Refresh Screen", callback_data="control_refresh")
+        ],
+        [
+            InlineKeyboardButton("🚀 Launch agy CLI", callback_data="control_agy"),
+            InlineKeyboardButton("⚙️ Open Config", callback_data="control_config")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello — Antigravity bridge ready.")
+    await update.message.reply_text(
+        "Hello — Antigravity bridge ready.",
+        reply_markup=get_control_keyboard()
+    )
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -52,7 +70,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def clean_terminal_output(text: str) -> tuple[str, bool]:
-    # Look for Google OAuth URL
+    """Strips ANSI sequences and extracts Google login links into a clean layout."""
+    # 1. Look for Google OAuth URL
     match = re.search(r'https://accounts\.google\.com/o/oauth2/auth\?[^\s\'"\x1b\\>]+', text)
     if match:
         auth_url = match.group(0)
@@ -64,26 +83,29 @@ def clean_terminal_output(text: str) -> tuple[str, bool]:
         url_match = re.search(r'(https://accounts\.google\.com/o/oauth2/auth\?[a-zA-Z0-9_\-=\+%\.&]+)', auth_url)
         if url_match:
             auth_url = url_match.group(1)
+        return auth_url, True
 
-        card = (
-            "🔑 *Antigravity Login Required*\n\n"
-            "To authorize your account, please click the link below:\n\n"
-            f"👉 [Click here to Login]({auth_url})\n\n"
-            "After logging in, copy the authorization code from your browser and paste it here."
-        )
-        return card, True
-
-    # Strip ANSI escape sequences:
-    # 1. Strip OSC 8 hyperlinks (\x1b]8;...)
-    cleaned = re.sub(r'\x1b\]8;[^\x1b\x07]*[\x1b\x07]', '', text)
-    # 2. Strip standard SGR parameters (\x1b[34;4m, \x1b[m, etc.)
-    cleaned = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', cleaned)
-    # 3. Strip any leftover control sequences
-    cleaned = cleaned.replace('\x1b]8;;', '').replace('\x1b\\', '').replace('\x1b', '')
-    # 4. Clean up any weird leftovers
-    cleaned = re.sub(r'\[[0-9;]*[a-zA-Z]', '', cleaned)
+    # 2. Strip ANSI escape sequences:
+    # OSC 8 hyperlinks (\x1b]8;...)
+    cleaned = re.sub(r'\x1b\]8;[^\x1b\x07]*(?:\x1b\\|\x07)', '', text)
+    # Standard SGR / CSI parameters (\x1b[34;4m, \x1b[m, etc.)
+    cleaned = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', cleaned)
+    # Remaining raw ESC sequences
+    cleaned = re.sub(r'\x1b.', '', cleaned)
+    # Standalone control characters
+    cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', cleaned)
     
-    return cleaned.strip(), False
+    # 3. Strip bracketed paste and leftover truncated CSI commands
+    cleaned = cleaned.replace("[?2004l", "").replace("[?2004h", "")
+    cleaned = re.sub(r'\[[0-9;?]*[mJKhHdDL]', '', cleaned)
+    
+    cleaned = cleaned.strip()
+    
+    # Avoid yielding garbage punctuation chunks
+    if cleaned in [']', '', ']', ']];', ';', 'm', 'm ]8;;']:
+        return "", False
+        
+    return cleaned, False
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -99,8 +121,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Send the input to the running agy CLI
     agy.send_command(str(user_id), text)
 
-    # Create initial Telegram message and stream updates by tailing the tmux pipe-pane log
-    sent = await update.message.reply_text("Running...")
+    # Create initial Telegram message and stream updates
+    sent = await update.message.reply_text("Running...", reply_markup=get_control_keyboard())
 
     async def streamer():
         try:
@@ -111,16 +133,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         continue
                     
                     if is_card:
-                        # Markdown text with clickable link
+                        # Markdown link wrapped in a button
+                        keyboard = [[InlineKeyboardButton("🔗 Log In (Google)", url=display)]]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
                         await context.bot.edit_message_text(
                             chat_id=sent.chat_id,
                             message_id=sent.message_id,
-                            text=display,
+                            text=(
+                                "🔑 *Antigravity Login Required*\n\n"
+                                "Please click the button below to authorize, then copy the code from your browser and paste it here in the chat:"
+                            ),
                             parse_mode="Markdown",
-                            disable_web_page_preview=True
+                            reply_markup=reply_markup
                         )
                     else:
-                        # Wrap standard terminal output in a code block
+                        # Wrap terminal output in code block
                         if len(display) > 3500:
                             display = display[-3500:]
                         code_text = "```\n" + display + "\n```"
@@ -128,7 +156,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             chat_id=sent.chat_id,
                             message_id=sent.message_id,
                             text=code_text,
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            reply_markup=get_control_keyboard()
                         )
                 except Exception:
                     pass
@@ -138,6 +167,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # spawn background task
     context.application.create_task(streamer())
 
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Processes button presses from the control keyboard."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    if not is_authorized(user_id):
+        await query.message.reply_text("Unauthorized.")
+        return
+        
+    action = query.data
+    logger.info(f"handle_callback: user {user_id} triggered action {action}")
+    
+    if action == "control_interrupt":
+        agy.sm.interrupt(str(user_id))
+        await query.message.reply_text("🛑 Sent Interrupt (Ctrl-C) to your session.")
+        
+    elif action == "control_refresh":
+        output = agy.read(str(user_id), lines=50)
+        display, is_card = clean_terminal_output(output)
+        
+        if is_card:
+            keyboard = [[InlineKeyboardButton("🔗 Log In (Google)", url=display)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text=(
+                    "🔑 *Antigravity Login Required*\n\n"
+                    "Please click the button below to authorize, then copy the code and paste it here:"
+                ),
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
+        elif display:
+            code_text = "```\n" + display + "\n```"
+            await query.edit_message_text(
+                text=code_text,
+                parse_mode="Markdown",
+                reply_markup=get_control_keyboard()
+            )
+        else:
+            await query.edit_message_text(
+                text="`Terminal output is empty.`",
+                parse_mode="Markdown",
+                reply_markup=get_control_keyboard()
+            )
+            
+    elif action == "control_agy":
+        agy.start_for_user(str(user_id))
+        agy.send_command(str(user_id), "agy")
+        await query.message.reply_text("🚀 Sent launch command: 'agy'")
+        
+    elif action == "control_config":
+        agy.send_command(str(user_id), "/config")
+        await query.message.reply_text("⚙️ Sent command: '/config'")
 
 
 # Global application reference for async execution
@@ -162,6 +246,7 @@ async def run_bot_async() -> None:
 
         telegram_app.add_handler(CommandHandler("start", start))
         telegram_app.add_handler(CommandHandler("cancel", cancel))
+        telegram_app.add_handler(CallbackQueryHandler(handle_callback))
         telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
         logger.info("Initializing Telegram bot application...")
@@ -173,7 +258,6 @@ async def run_bot_async() -> None:
         logger.info("Telegram bot is running and actively polling!")
     except Exception as e:
         logger.error(f"FATAL ERROR starting Telegram bot: {e}", exc_info=True)
-
 
 
 async def stop_bot_async() -> None:
@@ -205,6 +289,7 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
     logger.info("Starting Telegram bot")
@@ -214,7 +299,6 @@ def main() -> None:
         logger.exception("Telegram bot crashed; sleeping before retry")
         while True:
             time.sleep(60)
-
 
 
 if __name__ == "__main__":
