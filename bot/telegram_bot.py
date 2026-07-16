@@ -94,7 +94,13 @@ def main() -> None:
             time.sleep(60)
         return
 
-    app = ApplicationBuilder().token(token).build()
+    base_url = os.getenv("TELEGRAM_BASE_URL")
+    if base_url:
+        logger.info(f"Using custom Telegram base URL: {base_url}")
+        app = ApplicationBuilder().token(token).base_url(base_url).build()
+    else:
+        app = ApplicationBuilder().token(token).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))

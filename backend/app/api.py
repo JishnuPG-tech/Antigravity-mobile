@@ -66,3 +66,26 @@ async def interrupt_session(req: InterruptReq):
         raise HTTPException(status_code=500, detail=str(e))
     return {"status": "interrupted"}
 
+
+import httpx
+
+@router.get("/debug/ping-telegram")
+async def ping_telegram():
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get("https://api.telegram.org")
+            return {"status": resp.status_code, "text": resp.text[:100]}
+    except Exception as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
+
+@router.get("/debug/ping-url")
+async def ping_url(url: str = "https://www.google.com"):
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            return {"status": resp.status_code, "text": resp.text[:100]}
+    except Exception as e:
+        return {"error": type(e).__name__, "message": str(e)}
+
+
