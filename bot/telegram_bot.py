@@ -86,6 +86,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.application.create_task(streamer())
 
 
+# Global application reference for async execution
+telegram_app = None
+
+async def run_bot_async() -> None:
+    global telegram_app
+    token = os.getenv("BOT_TOKEN") or settings.bot_token
+    if not token:
+        logger.warning("BOT_TOKEN not set; Telegram bot listener is idle")
+        return
+
+    base_url = os.getenv("TELEGRAM_BASE_URL")
+    if base_url:
+        logger.info(f"Using custom Telegram base URL: {base_url}")
+        telegram_app = ApplicationBuilder().token(token).base_url(base_url).build()
+    else:
+        telegram_app = ApplicationBuilder().token(token).build()
+
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("cancel", cancel))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
+    logger.info("Initializing Telegram bot...")
+    await telegram_app.initialize()
+    logger.info("Starting Telegram bot...")
+    await telegram_app.start()
+    logger.info("Starting polling...")
+    await telegram_app.updater.start_polling()
+
+
+async def stop_bot_async() -> None:
+    global telegram_app
+    if telegram_app:
+        logger.info("Stopping Telegram bot...")
+        try:
+            await telegram_app.updater.stop()
+            await telegram_app.stop()
+            await telegram_app.shutdown()
+        except Exception as e:
+            logger.error(f"Error during bot shutdown: {e}")
+
+
 def main() -> None:
     token = os.getenv("BOT_TOKEN") or settings.bot_token
     if not token:
@@ -112,6 +153,7 @@ def main() -> None:
         logger.exception("Telegram bot crashed; sleeping before retry")
         while True:
             time.sleep(60)
+
 
 
 if __name__ == "__main__":

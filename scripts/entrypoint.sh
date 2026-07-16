@@ -34,5 +34,6 @@ install_antigravity_async() {
 # Do not block Space startup on CLI installation.
 install_antigravity_async &
 
-echo "Starting supervisord"
-exec /usr/bin/supervisord -n -c /app/config/supervisord.conf
+echo "Starting uvicorn"
+exec uvicorn backend.app.main:app --host 0.0.0.0 --port "${PORT:-7860}" --log-level info
+
