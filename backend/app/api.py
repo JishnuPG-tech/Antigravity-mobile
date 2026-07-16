@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from backend.app.config import settings
 from sessions.db import SessionStore
 from core.session_manager import SessionManager
+import asyncio
+import logging
+
 
 router = APIRouter()
 
@@ -122,6 +125,57 @@ async def get_install_log():
             except Exception as e:
                 return {"error": f"Failed to read {path}: {str(e)}"}
     return {"error": "Installation log file not found."}
+
+
+@router.websocket("/ws/session/{user_id}")
+async def websocket_session(websocket: WebSocket, user_id: str):
+    await websocket.accept()
+    sm = SessionManager(settings)
+    from bot.telegram_bot import clean_terminal_output
+    
+    # Ensure session exists
+    sm.ensure_session(user_id)
+    
+    async def stream_to_client():
+        try:
+            async for chunk in sm.stream_output(user_id):
+                display, is_card = clean_terminal_output(chunk)
+                if display:
+                    await websocket.send_json({
+                        "type": "output",
+                        "text": display,
+                        "is_card": is_card
+                    })
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logging.error(f"Error in stream_to_client: {e}")
+
+    streamer_task = asyncio.create_task(stream_to_client())
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+            if msg_type == "command":
+                sm.send_input(user_id, data.get("text"))
+            elif msg_type == "key":
+                session = sm._session_name(user_id)
+                import subprocess
+                subprocess.run(["tmux", "send-keys", "-t", session, data.get("key")], check=True)
+            elif msg_type == "interrupt":
+                sm.interrupt(user_id)
+    except WebSocketDisconnect:
+        logging.info(f"WebSocket disconnected for user: {user_id}")
+    except Exception as e:
+        logging.error(f"WebSocket error for user {user_id}: {e}")
+    finally:
+        streamer_task.cancel()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
 
 
 
