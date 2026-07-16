@@ -23,8 +23,9 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app
-RUN chmod +x /app/scripts/install_antigravity.sh /app/scripts/entrypoint.sh || true
+RUN chmod +x /app/scripts/*.sh || true
 
 EXPOSE 7860
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+
