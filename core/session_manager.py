@@ -33,14 +33,21 @@ class SessionManager:
         ws = os.path.join(self.workspace_root, f"user_{user_id}", project)
         os.makedirs(ws, exist_ok=True)
 
+        # Force resize of the session in case it already exists
+        subprocess.run(["tmux", "resize-window", "-t", session, "-x", "100", "-y", "40"], capture_output=True)
+
         # Check if tmux session exists
         res = subprocess.run(["tmux", "has-session", "-t", session], capture_output=True)
+
         if res.returncode != 0:
             # create detached session and start shell
             subprocess.run(["tmux", "new-session", "-d", "-s", session, "-c", ws, "bash"], check=True)
             time.sleep(0.1)
+            # Set window size to 100x40 to prevent TUI menu clipping
+            subprocess.run(["tmux", "resize-window", "-t", session, "-x", "100", "-y", "40"], check=False)
             # start `agy` inside tmux (it will self-update/run)
             subprocess.run(["tmux", "send-keys", "-t", session, "agy", "Enter"])
+
             # set up a tmux pipe-pane to write session output to a log file for streaming
             log_path = os.path.join(ws, ".agy_output.log")
             try:
