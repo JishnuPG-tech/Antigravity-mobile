@@ -66,13 +66,24 @@ class SessionManager:
             return
 
     def capture_output(self, user_id: str, lines: int = 200) -> str:
+        """Capture current terminal screen from tmux (plain text, no ANSI codes).
+
+        Without -e flag tmux returns rendered cell content — no escape sequences.
+        tmux has already done all terminal emulation internally.
+        """
         session = self._session_name(user_id)
-        # capture last N lines from tmux pane
         try:
-            cmd = ["tmux", "capture-pane", "-pS", f"-{lines}", "-t", f"{session}:0.0"]
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            cmd = ["tmux", "capture-pane", "-p", "-S", f"-{lines}",
+                   "-t", f"{session}:0.0"]
+            res = subprocess.run(
+                cmd, capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=5,
+            )
             return res.stdout
         except FileNotFoundError:
+            return ""
+        except subprocess.TimeoutExpired:
             return ""
 
     async def stream_output(self, user_id: str):
