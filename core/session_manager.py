@@ -102,7 +102,7 @@ class SessionManager:
                 if not os.path.exists(log_path):
                     await asyncio.sleep(0.1)
                     continue
-                with open(log_path, "r", errors="replace") as f:
+                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
                     f.seek(pos)
                     data = f.read()
                     if data:
