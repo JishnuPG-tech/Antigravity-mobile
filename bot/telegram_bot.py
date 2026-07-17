@@ -381,13 +381,28 @@ async def _streamer(uid: str) -> None:
             process_chunk(uid, raw)
             tail = get_tail(uid)
 
-            # ── Success detection ────────────────────────────────────────────
+            # ── Auth completion detection ─────────────────────────────────
+            # Strategy: after sending the code (code_sent state), auth is done
+            # when BOTH conditions hold:
+            #   1. No Google OAuth URL in the latest raw chunk or current buffer
+            #   2. No code-entry prompt visible in the tail
+            # We also accept explicit success keywords as a bonus signal.
             auth_st = await get_auth_state(uid)
             if auth_st in ("code_sent", "url_shown"):
-                if detect_success(tail[-600:]):
+                url_in_raw    = detect_google_url(raw) is not None
+                url_in_buf    = _RE_GOOGLE_URL.search(_screen[uid]) is not None
+                prompt_in_buf = detect_code_prompt(tail[-400:])
+                success_kw    = detect_success(tail[-600:])
+
+                auth_complete = (
+                    success_kw
+                    or (auth_st == "code_sent" and not url_in_raw and not url_in_buf and not prompt_in_buf)
+                )
+
+                if auth_complete:
                     await mark_authenticated(uid)
                     _screen[uid] = _RE_GOOGLE_URL.sub('', _screen[uid])
-                    logger.info(f"[Auth] User {uid} authenticated successfully")
+                    logger.info(f"[Auth] User {uid} authenticated (url_gone={not url_in_buf}, kw={success_kw})")
 
             # ── Signal live-update loops ─────────────────────────────────────
             get_event(uid).set()
@@ -756,13 +771,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     auth_st = await get_auth_state(uid)
 
     # ── AUTH CODE: user pasting Google auth code ─────────────────────────────
-    if is_auth_code(text) or auth_st == "url_shown":
-        logger.info(f"[Auth] Forwarding auth code for user {uid} (state={auth_st})")
+    # Only treat as auth code if it actually LOOKS like one (regex match).
+    # Do NOT treat arbitrary text (e.g. "1") as an auth code just because
+    # state == url_shown — user might be typing something else.
+    code_looks_valid = is_auth_code(text)
+
+    if code_looks_valid or (auth_st == "url_shown" and detect_code_prompt(_screen[uid][-400:])):
+        logger.info(f"[Auth] Forwarding auth code for user {uid} (state={auth_st}, valid={code_looks_valid})")
 
         # Transition state
         await set_auth_state(uid, "code_sent")
 
-        # Forward code to CLI using literal send (no special char interpretation)
+        # Forward code to CLI using literal send (-l avoids tmux special char escaping)
         tmux_send(uid, text, enter=True)
 
         # Scrub the Google URL from screen buffer to prevent re-triggering
@@ -771,14 +791,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         sent = await update.message.reply_text(
             "⏳ *Authorization code forwarded to Antigravity CLI*\n\n"
-            "Verifying with Google — please wait a moment\\.\n"
-            "Tap *Check Status* to refresh the screen\\.",
+            "Verifying with Google — please wait\.\.\.\.\n"
+            "Tap *Check Status* to refresh\.",
             parse_mode="MarkdownV2",
             reply_markup=kb_code_waiting(),
         )
 
+        # Longer timeout — auth can take 10-30 seconds
         context.application.create_task(
-            live_loop(context, uid, sent.chat_id, sent.message_id, timeout=60.0)
+            live_loop(context, uid, sent.chat_id, sent.message_id, timeout=120.0)
         )
         return
 
@@ -838,17 +859,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "ctrl_refresh":
         raw = agy.read(uid, lines=60)
         cleaned = strip_ansi(raw)
-
-        # Re-detect auth URL
-        url = detect_google_url(raw)
         auth_st = await get_auth_state(uid)
-        if url and auth_st not in ("authenticated", "code_sent"):
+
+        url = detect_google_url(raw)
+
+        if auth_st == "code_sent":
+            # KEY FIX: If we're in code_sent and Google URL is GONE from
+            # the current tmux pane — auth is done, mark authenticated.
+            if not url and not detect_code_prompt(cleaned):
+                await mark_authenticated(uid)
+                _screen[uid] = cleaned  # show actual current terminal
+                logger.info(f"[Auth] Refresh confirmed auth complete for {uid}")
+            else:
+                # Still showing auth prompt — update buffer and stay in state
+                _screen[uid] = cleaned
+        elif url and auth_st not in ("authenticated",):
             await set_auth_url(uid, url)
             await set_auth_state(uid, "url_shown")
+            _screen[uid] = cleaned
         elif not url and auth_st == "url_shown":
-            await set_auth_state(uid, "none")
+            # URL gone after refresh — consider done
+            await mark_authenticated(uid)
+            _screen[uid] = cleaned
+        else:
+            _screen[uid] = cleaned
 
-        _screen[uid] = cleaned
         await render(context, chat_id, msg_id, uid)
 
     # ── Launch agy ───────────────────────────────────────────────────────────
