@@ -152,3 +152,52 @@ async def websocket_session(websocket: WebSocket, user_id: str):
             await websocket.close()
         except Exception:
             pass
+
+
+@router.get("/debug/tmux")
+async def debug_tmux():
+    import subprocess
+    results = {}
+    
+    # 1. Check tmux version
+    try:
+        res = subprocess.run(["tmux", "-V"], capture_output=True, text=True, timeout=5)
+        results["version"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["version"] = {"error": str(e)}
+
+    # 2. Check running sessions
+    try:
+        res = subprocess.run(["tmux", "list-sessions"], capture_output=True, text=True, timeout=5)
+        results["sessions"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["sessions"] = {"error": str(e)}
+
+    # 3. Try to create a test session
+    try:
+        res = subprocess.run(["tmux", "new-session", "-d", "-s", "debug_test", "-c", "/tmp", "bash"], capture_output=True, text=True, timeout=5)
+        results["create_session"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["create_session"] = {"error": str(e)}
+
+    # 4. Check if test session exists
+    try:
+        res = subprocess.run(["tmux", "has-session", "-t", "debug_test"], capture_output=True, text=True, timeout=5)
+        results["has_session"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["has_session"] = {"error": str(e)}
+
+    # 5. Capture test session
+    try:
+        res = subprocess.run(["tmux", "capture-pane", "-p", "-t", "debug_test:0.0"], capture_output=True, text=True, timeout=5)
+        results["capture"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["capture"] = {"error": str(e)}
+
+    # 6. Clean up test session
+    try:
+        subprocess.run(["tmux", "kill-session", "-t", "debug_test"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+    return results
