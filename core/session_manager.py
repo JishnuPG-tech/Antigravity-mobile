@@ -79,23 +79,37 @@ class SessionManager:
         """Async generator that yields appended output from the session log file.
 
         Relies on `tmux pipe-pane` writing to `<workspace>/.agy_output.log`.
-        If the log file doesn't exist or tmux is unavailable, yields empty strings.
+        Prefers the 'default' project directory; falls back to the user root.
+        Ensures pipe-pane is active before polling starts.
         """
         session = self._session_name(user_id)
         ws = os.path.join(self.workspace_root, f"user_{user_id}")
-        # find the first project folder if any
-        if os.path.isdir(ws):
-            # choose default project dir if available
-            candidates = [os.path.join(ws, d) for d in os.listdir(ws)]
+
+        # Prefer 'default' project directory
+        default_dir = os.path.join(ws, "default")
+        if os.path.isdir(default_dir):
+            target_dir = default_dir
+        elif os.path.isdir(ws):
+            candidates = [os.path.join(ws, d) for d in os.listdir(ws) if os.path.isdir(os.path.join(ws, d))]
             target_dir = candidates[0] if candidates else ws
         else:
             target_dir = ws
+        os.makedirs(target_dir, exist_ok=True)
 
         log_path = os.path.join(target_dir, ".agy_output.log")
-        # create file if missing
+        # Touch log file
         open(log_path, "a").close()
 
-        # Tail file asynchronously
+        # (Re-)enable tmux pipe-pane to write to log
+        try:
+            subprocess.run(
+                ["tmux", "pipe-pane", "-t", session, f"cat >> {log_path}"],
+                check=False, capture_output=True
+            )
+        except FileNotFoundError:
+            pass
+
+        # Tail file asynchronously with minimal latency
         pos = 0
         try:
             while True:
@@ -109,7 +123,7 @@ class SessionManager:
                         pos = f.tell()
                         yield data
                         continue
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)
         except asyncio.CancelledError:
             return
 
