@@ -1,17 +1,12 @@
 """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║         ANTIGRAVITY  —  Telegram Terminal Bot  (v3 — Capture-Pane)         ║
-║                                                                              ║
-║  ARCHITECTURE (v3):                                                          ║
-║  ─────────────────                                                           ║
-║  • ONE persistent terminal message per user (no new message per command)    ║
-║  • tmux capture-pane is the ONLY display source — no virtual buffer,        ║
-║    no ANSI emulation, no log files. tmux IS the terminal emulator.          ║
-║  • Single background polling loop per user: capture → diff → edit           ║
-║  • Poll every 100ms, edit Telegram only when content changed (max 1/sec)    ║
-║  • Auth state persisted in SQLite, survives restarts                        ║
-║  • Full keyboard: arrows, Tab, ESC, Ctrl-C/D/Z, F1-F5, PgUp/Dn, Home/End  ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+OpenCode Mobile — Telegram Terminal Bot (v3, capture-pane)
+
+ARCHITECTURE:
+  - ONE persistent terminal message per user (never creates new messages per command)
+  - tmux capture-pane is the ONLY display source — tmux handles all ANSI/CR/cursor
+  - Single background polling loop per user: capture -> diff -> edit (100ms / 0.5s)
+  - NO login / NO auth flow — OpenCode uses free models with no login required
+  - Full keyboard mapping: arrows, Tab, ESC, Ctrl-C/D/Z, F1-F5, PgUp/Dn, Home/End
 """
 
 import asyncio
@@ -20,16 +15,9 @@ import os
 import re
 import subprocess
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 
-from services.antigravity_manager import AntigravityManager
-from core.state_store import (
-    get_auth_state, is_authenticated,
-    set_auth_state, set_auth_url, get_auth_url,
-    clear_auth_url, mark_authenticated, mark_logged_out,
-    get_state,
-)
+from services.opencode_manager import OpencodeManager
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand,
 )
@@ -40,47 +28,40 @@ from telegram.ext import (
 from telegram.error import BadRequest, RetryAfter, NetworkError
 from backend.app.config import settings
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("agy.bot")
+logger = logging.getLogger("opencode.bot")
 
-# ─────────────────────────────────────────────────────────────────────────────
-agy = AntigravityManager()
+# ---------------------------------------------------------------------------
+oc = OpencodeManager()
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Per-user runtime state
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+_terminal_msg: dict[str, tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
+_last_sent:    dict[str, str]             = {}   # uid -> last text sent to Telegram
+_poll_tasks:   dict[str, asyncio.Task]    = {}   # uid -> background poll task
 
-# (chat_id, message_id) of the one persistent terminal message per user
-_terminal_msg: dict[str, tuple[int, int]] = {}
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+POLL_INTERVAL = 0.10    # seconds between capture-pane calls
+MIN_EDIT_GAP  = 0.50    # minimum seconds between Telegram edits
+CAPTURE_LINES = 40      # terminal history lines to show
+MAX_MSG_CHARS = 3800    # max chars in a Telegram code block
 
-# The last text we edited into the Telegram terminal message
-_last_sent: dict[str, str] = {}
-
-# Background polling task per user
-_poll_tasks: dict[str, asyncio.Task] = {}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ─────────────────────────────────────────────────────────────────────────────
-
-POLL_INTERVAL  = 0.10   # seconds between tmux capture-pane calls
-MIN_EDIT_GAP   = 0.50   # minimum seconds between Telegram edits (rate limit)
-CAPTURE_LINES  = 40     # lines of terminal history to capture
-MAX_MSG_CHARS  = 3800   # Telegram code block limit
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Authorization
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 def _parse_users() -> set[int]:
-    raw = settings.authorized_users or os.getenv("AUTHORIZED_USERS", "")
+    raw = getattr(settings, "authorized_users", "") or os.getenv("AUTHORIZED_USERS", "")
     out: set[int] = set()
-    for v in [x.strip() for x in raw.split(",") if x.strip()]:
+    for v in raw.split(","):
+        v = v.strip()
         try:
             out.add(int(v))
         except ValueError:
@@ -92,31 +73,11 @@ AUTHORIZED_USERS = _parse_users()
 def is_authorized(uid: int) -> bool:
     return bool(AUTHORIZED_USERS) and int(uid) in AUTHORIZED_USERS
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Pattern helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-_RE_ANSI  = re.compile(r'\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*[\x07\x1b]|.)')
-_RE_CTRL  = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
-_RE_GURL  = re.compile(
-    r'https://accounts\.google\.com/o/oauth2/(?:v2/)?auth\?[a-zA-Z0-9_.~\-=+%&]+'
-)
-_RE_CODE  = re.compile(
-    r'^(4/[0-9A-Za-z_\-]{10,}|ya29\.[0-9A-Za-z_\-\.]{10,}|1//[0-9A-Za-z_\-]{10,})$'
-)
-_RE_DCODE = re.compile(r'^[A-Z0-9]{4}-[A-Z0-9]{4}$')
-
-_CODE_PROMPTS = [
-    "enter the authorization code", "enter authorization code",
-    "enter code", "paste the code", "paste code",
-    "verification code", "auth code",
-]
-_SUCCESS_KW = [
-    "you are now logged in", "login successful", "authenticated successfully",
-    "logged in as", "credentials saved", "token saved", "authorized",
-    "authorization complete",
-]
-
+# ---------------------------------------------------------------------------
+# ANSI / terminal helpers
+# ---------------------------------------------------------------------------
+_RE_ANSI = re.compile(r'\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*[\x07\x1b]|.)')
+_RE_CTRL = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 def strip_ansi(text: str) -> str:
     text = _RE_ANSI.sub('', text)
@@ -125,55 +86,51 @@ def strip_ansi(text: str) -> str:
     return text
 
 
-def detect_google_url(text: str) -> str | None:
-    m = _RE_GURL.search(text)
-    if not m:
-        return None
-    url = m.group(0)
-    url = re.split(r'[\s\x1b\'\"\\]', url)[0].rstrip('];\\,')
-    return url if len(url) > 50 else None
+def clean_terminal_output(text: str, keep_whitespace: bool = False) -> tuple[str, bool]:
+    """Compatibility shim used by api.py WebSocket endpoint."""
+    cleaned = strip_ansi(text)
+    if not keep_whitespace:
+        cleaned = cleaned.strip()
+    return cleaned, False
 
 
-def is_auth_code(text: str) -> bool:
-    t = text.strip()
-    return bool(_RE_CODE.match(t)) or bool(_RE_DCODE.match(t))
+def format_terminal(raw: str) -> str:
+    """Convert tmux capture-pane output into a Telegram code block."""
+    text = strip_ansi(raw)
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
 
+    content = "\n".join(lines)
 
-def has_code_prompt(text: str) -> bool:
-    low = text.lower()
-    return any(kw in low for kw in _CODE_PROMPTS)
+    if len(content) > MAX_MSG_CHARS:
+        content = content[-MAX_MSG_CHARS:]
+        nl = content.find("\n")
+        if nl != -1:
+            content = content[nl + 1:]
 
+    if not content.strip():
+        content = "(terminal output empty — type 'opencode' to launch)"
 
-def has_success(text: str) -> bool:
-    low = text.lower()
-    return any(kw in low for kw in _SUCCESS_KW)
+    content = content.replace("`", "\u02cb")   # replace backticks so code block doesn't break
+    return "```\n" + content + "\n```"
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # tmux interface
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 def _session(uid: str) -> str:
-    return agy.sm._session_name(str(uid))
+    return oc.sm._session_name(str(uid))
 
 
 def tmux_capture(uid: str, lines: int = CAPTURE_LINES) -> str:
-    """
-    Get the CURRENT rendered terminal screen via tmux capture-pane.
-    This is the only correct way to get terminal output — tmux already
-    handles all ANSI, CR, backspace, cursor movement internally.
-    Returns plain text (no ANSI codes when -e is omitted).
-    """
+    """Get the current rendered terminal via tmux capture-pane (plain text, no ANSI)."""
     session = _session(uid)
     try:
         res = subprocess.run(
-            ["tmux", "capture-pane", "-p", "-S", f"-{lines}",
-             "-t", f"{session}:0.0"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=3,
+            ["tmux", "capture-pane", "-p", "-S", f"-{lines}", "-t", f"{session}:0.0"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
         )
         return res.stdout
     except FileNotFoundError:
@@ -181,12 +138,12 @@ def tmux_capture(uid: str, lines: int = CAPTURE_LINES) -> str:
     except subprocess.TimeoutExpired:
         return "(capture timeout)"
     except Exception as e:
-        logger.warning(f"tmux_capture: {e}")
+        logger.warning(f"tmux_capture error: {e}")
         return ""
 
 
 def tmux_send(uid: str, text: str, enter: bool = True) -> None:
-    """Send text literally to tmux (-l avoids tmux interpreting special chars)."""
+    """Send text literally to the tmux pane (-l avoids tmux interpreting special chars)."""
     session = _session(uid)
     try:
         subprocess.run(
@@ -199,26 +156,27 @@ def tmux_send(uid: str, text: str, enter: bool = True) -> None:
                 capture_output=True, timeout=5,
             )
     except Exception as e:
-        logger.warning(f"tmux_send: {e}")
+        logger.warning(f"tmux_send error: {e}")
 
 
 def tmux_key(uid: str, key: str) -> None:
-    session = _session(uid)
-    key_map = {
+    """Send a named key (Up/Down/Tab/etc.) to the tmux pane."""
+    KEY_MAP = {
         "Up": "Up", "Down": "Down", "Left": "Left", "Right": "Right",
         "Enter": "Enter", "Tab": "Tab", "BSpace": "BSpace", "Escape": "Escape",
         "ctrl_c": "C-c", "ctrl_d": "C-d", "ctrl_z": "C-z",
         "F1": "F1", "F2": "F2", "F3": "F3", "F4": "F4", "F5": "F5",
         "PPage": "PPage", "NPage": "NPage", "Home": "Home", "End": "End",
     }
-    k = key_map.get(key, key)
+    k = KEY_MAP.get(key, key)
+    session = _session(uid)
     try:
         subprocess.run(
             ["tmux", "send-keys", "-t", session, k],
             capture_output=True, timeout=5,
         )
     except Exception as e:
-        logger.warning(f"tmux_key {key}: {e}")
+        logger.warning(f"tmux_key {key} error: {e}")
 
 
 def tmux_interrupt(uid: str) -> None:
@@ -227,11 +185,10 @@ def tmux_interrupt(uid: str) -> None:
         subprocess.run(["tmux", "send-keys", "-t", session, "C-c"],
                        capture_output=True, timeout=5)
     except Exception as e:
-        logger.warning(f"tmux_interrupt: {e}")
+        logger.warning(f"tmux_interrupt error: {e}")
 
 
 def tmux_resize(uid: str, cols: int = 88, rows: int = 35) -> None:
-    """Resize tmux window to fit nicely in Telegram code block."""
     session = _session(uid)
     try:
         subprocess.run(
@@ -242,10 +199,34 @@ def tmux_resize(uid: str, cols: int = 88, rows: int = 35) -> None:
         pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Keyboards
-# ─────────────────────────────────────────────────────────────────────────────
+def is_tmux_running_cmd(uid: str) -> bool:
+    """Return True if the pane is running something other than bash (e.g. opencode)."""
+    session = _session(uid)
+    try:
+        res = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", f"{session}:0.0",
+             "-F", "#{pane_current_command}"],
+            capture_output=True, text=True, timeout=2,
+        )
+        cmd = res.stdout.strip()
+        return cmd not in ("", "bash", "sh")
+    except Exception:
+        return False
 
+
+def tmux_clear(uid: str) -> None:
+    session = _session(uid)
+    try:
+        subprocess.run(["tmux", "send-keys", "-t", session, "C-l"],
+                       capture_output=True, timeout=2)
+        subprocess.run(["tmux", "clear-history", "-t", session],
+                       capture_output=True, timeout=2)
+    except Exception:
+        pass
+
+# ---------------------------------------------------------------------------
+# Keyboards
+# ---------------------------------------------------------------------------
 def kb_terminal(uid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("↑", callback_data="key_Up")],
@@ -273,86 +254,27 @@ def kb_terminal(uid: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("F5",  callback_data="key_F5"),
         ],
         [
-            InlineKeyboardButton("⇞ PgUp", callback_data="key_PPage"),
-            InlineKeyboardButton("⇟ PgDn", callback_data="key_NPage"),
+            InlineKeyboardButton("⇞ PgUp",  callback_data="key_PPage"),
+            InlineKeyboardButton("⇟ PgDn",  callback_data="key_NPage"),
             InlineKeyboardButton("⇤ Home",  callback_data="key_Home"),
             InlineKeyboardButton("End ⇥",   callback_data="key_End"),
         ],
         [
-            InlineKeyboardButton("🚀 Launch agy",  callback_data="ctrl_agy"),
-            InlineKeyboardButton("🔄 Refresh",     callback_data="ctrl_refresh"),
-        ],
-        [
-            InlineKeyboardButton("🛑 Stop (^C)",   callback_data="ctrl_interrupt"),
-            InlineKeyboardButton("🔴 Logout",      callback_data="ctrl_logout"),
-        ],
-    ])
-
-
-def kb_auth(url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 Authorize with Google  ↗", url=url)],
-        [
+            InlineKeyboardButton("🚀 Launch opencode", callback_data="ctrl_launch"),
             InlineKeyboardButton("🔄 Refresh",         callback_data="ctrl_refresh"),
-            InlineKeyboardButton("🛑 Cancel",           callback_data="ctrl_interrupt"),
+        ],
+        [
+            InlineKeyboardButton("🛑 Stop (^C)",  callback_data="ctrl_interrupt"),
+            InlineKeyboardButton("🗑 Clear",      callback_data="ctrl_clear"),
         ],
     ])
 
-
-def kb_verifying() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Check Status",  callback_data="ctrl_refresh")],
-        [InlineKeyboardButton("🛑 Cancel",         callback_data="ctrl_interrupt")],
-    ])
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Core: format terminal content for Telegram
-# ─────────────────────────────────────────────────────────────────────────────
-
-def format_terminal(raw: str) -> str:
-    """
-    Convert tmux capture-pane output to Telegram code block.
-    capture-pane without -e returns plain text (no ANSI), but may have
-    some control artifacts — clean those and trim to fit Telegram limits.
-    """
-    # Strip any stray ANSI that slipped through (rare but possible)
-    text = strip_ansi(raw)
-    # Remove trailing whitespace on each line (tmux pads lines to terminal width)
-    lines = [ln.rstrip() for ln in text.splitlines()]
-    # Drop leading blank lines
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    # Drop trailing blank lines
-    while lines and not lines[-1].strip():
-        lines.pop()
-
-    content = "\n".join(lines)
-
-    # Trim to fit in Telegram code block
-    if len(content) > MAX_MSG_CHARS:
-        # Keep the LAST MAX_MSG_CHARS chars, cut at newline
-        content = content[-MAX_MSG_CHARS:]
-        nl = content.find("\n")
-        if nl != -1:
-            content = content[nl + 1:]
-
-    if not content.strip():
-        content = "(terminal output empty)"
-
-    # Escape backticks inside the code block
-    content = content.replace("`", "\u02cb")
-    return "```\n" + content + "\n```"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Telegram message editing (with error handling)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Safe Telegram edit
+# ---------------------------------------------------------------------------
 async def _edit(context, chat_id: int, msg_id: int,
                 text: str, markup: InlineKeyboardMarkup,
                 parse_mode: str = "Markdown") -> bool:
-    """Edit a Telegram message. Returns True on success."""
     try:
         await context.bot.edit_message_text(
             chat_id=chat_id, message_id=msg_id,
@@ -362,144 +284,57 @@ async def _edit(context, chat_id: int, msg_id: int,
         return True
     except BadRequest as e:
         err = str(e).lower()
-        if "not modified" in err:
-            return False   # content unchanged — not an error
-        if "message to edit not found" in err:
-            logger.warning(f"Terminal message {msg_id} deleted by user")
+        if "not modified" in err or "message to edit not found" in err:
             return False
         logger.debug(f"edit BadRequest: {e}")
         return False
     except RetryAfter as e:
-        logger.warning(f"Telegram rate limit — sleeping {e.retry_after}s")
+        logger.warning(f"Telegram rate limit: sleeping {e.retry_after}s")
         await asyncio.sleep(e.retry_after + 0.5)
         return False
     except NetworkError as e:
-        logger.warning(f"NetworkError editing message: {e}")
+        logger.warning(f"NetworkError: {e}")
         return False
     except Exception as e:
         logger.debug(f"edit unexpected: {e}")
         return False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Auth state management helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def _handle_auth_detection(uid: str, screen_text: str) -> str | None:
-    """
-    Scan captured terminal output for Google OAuth URL.
-    Update auth state in DB. Return URL if found, else None.
-    """
-    url = detect_google_url(screen_text)
-    if url:
-        auth_st = await get_auth_state(uid)
-        if auth_st not in ("authenticated", "code_sent"):
-            await set_auth_url(uid, url)
-            if auth_st != "url_shown":
-                await set_auth_state(uid, "url_shown")
-                logger.info(f"[Auth] Google URL found for {uid}")
-    return url
-
-
-async def _check_auth_complete(uid: str, screen_text: str) -> bool:
-    """
-    After code was sent (code_sent state), check if auth is now complete.
-    Auth is complete when: URL is gone AND no code prompt visible.
-    """
-    auth_st = await get_auth_state(uid)
-    if auth_st not in ("code_sent",):
-        return False
-
-    url_gone    = detect_google_url(screen_text) is None
-    prompt_gone = not has_code_prompt(screen_text[-500:])
-    success     = has_success(screen_text[-500:])
-
-    if success or (url_gone and prompt_gone):
-        await mark_authenticated(uid)
-        logger.info(f"[Auth] User {uid} authenticated (url_gone={url_gone}, kw={success})")
-        return True
-    return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# The core polling loop — one per user, runs forever
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Core polling loop — one per user, runs forever
+# ---------------------------------------------------------------------------
 async def _poll_loop(uid: str, context) -> None:
     """
-    Continuously poll tmux capture-pane and update the user's terminal message.
-
-    This is the heart of the streaming system:
-      1. Call tmux capture-pane every POLL_INTERVAL (100ms)
-      2. Compare with last sent content
-      3. If changed AND enough time since last edit → edit Telegram message
-      4. Handle auth state transitions inline
+    Continuously captures the tmux screen and updates the Telegram terminal message.
+    - Poll every 100ms via tmux capture-pane
+    - Edit Telegram only when content changed AND 500ms since last edit
+    - Resetting _last_sent[uid] = "" from a callback forces immediate refresh
     """
     logger.info(f"[Poll] Started for user {uid}")
     last_edit_time = 0.0
-    last_content = ""
+    if uid not in _last_sent:
+        _last_sent[uid] = ""
 
     try:
         while True:
             await asyncio.sleep(POLL_INTERVAL)
 
-            # --- Check if we have a terminal message to update ---
             if uid not in _terminal_msg:
                 continue
             chat_id, msg_id = _terminal_msg[uid]
 
-            # --- Capture current terminal state (tmux is the emulator) ---
+            # Get current terminal state from tmux (full terminal emulation done by tmux)
             raw = tmux_capture(uid, lines=CAPTURE_LINES)
+            text = format_terminal(raw)
+            markup = kb_terminal(uid)
 
-            # --- Auth URL detection ---
-            auth_st = await get_auth_state(uid)
-            url = await _handle_auth_detection(uid, raw)
-            auth_st = await get_auth_state(uid)  # refresh after possible update
-
-            # --- Auth completion check ---
-            if auth_st == "code_sent":
-                just_authed = await _check_auth_complete(uid, raw)
-                if just_authed:
-                    auth_st = "authenticated"
-
-            # --- Build message content based on auth state ---
-            if auth_st == "url_shown" and url:
-                # Show login button
-                text = (
-                    "🔑 *Antigravity — Authorization Required*\n\n"
-                    "1\\. Tap *Authorize with Google* below\n"
-                    "2\\. Complete sign\\-in in your browser\n"
-                    "3\\. Copy the authorization code\n"
-                    "4\\. *Paste it here* — it will be sent to the CLI automatically"
-                )
-                markup = kb_auth(url)
-                parse_mode = "MarkdownV2"
-                new_content = f"AUTH:{url}"   # sentinel for change detection
-            elif auth_st == "code_sent":
-                text = (
-                    "⏳ *Verifying authorization code\\.\\.\\.*\n\n"
-                    "Confirming with Google — please wait\\.\n"
-                    "Tap *Check Status* if this takes more than 10 seconds\\."
-                )
-                markup = kb_verifying()
-                parse_mode = "MarkdownV2"
-                new_content = "VERIFYING"
-            else:
-                # Normal terminal output
-                text = format_terminal(raw)
-                markup = kb_terminal(uid)
-                parse_mode = "Markdown"
-                new_content = text
-
-            # --- Rate-limited edit ---
             now = time.monotonic()
-            content_changed = (new_content != last_content)
+            changed = (text != _last_sent.get(uid, ""))
             time_ok = (now - last_edit_time) >= MIN_EDIT_GAP
 
-            if content_changed and time_ok:
-                ok = await _edit(context, chat_id, msg_id, text, markup, parse_mode)
+            if changed and time_ok:
+                ok = await _edit(context, chat_id, msg_id, text, markup)
                 if ok:
-                    last_content = new_content
+                    _last_sent[uid] = text
                     last_edit_time = now
 
     except asyncio.CancelledError:
@@ -509,179 +344,150 @@ async def _poll_loop(uid: str, context) -> None:
 
 
 def ensure_poll_loop(uid: str, context) -> None:
-    """Ensure a single persistent poll loop runs for this user."""
     task = _poll_tasks.get(uid)
     if task is None or task.done():
         _poll_tasks[uid] = context.application.create_task(_poll_loop(uid, context))
         logger.debug(f"[Poll] Spawned for {uid}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /start
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     name = update.effective_user.first_name or "User"
 
     if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("⛔ You are not authorized to use this bot.")
+        await update.message.reply_text("You are not authorized to use this bot.")
         return
 
-    # Ensure tmux session
-    agy.start_for_user(uid)
-    # Resize terminal window to fit Telegram nicely
+    # Create/ensure tmux session
+    oc.start_for_user(uid)
     tmux_resize(uid, cols=88, rows=35)
 
-    # Get auth state from DB
-    auth_st = await get_auth_state(uid)
-
-    # Create/replace the persistent terminal message
-    initial_text = (
-        f"✅ *Welcome back, {name}\\!* Connecting\\.\\.\\."
-        if auth_st == "authenticated"
-        else "🚀 *Antigravity CLI starting\\.\\.\\.*"
-    )
-
+    # Send the one persistent terminal message
     sent = await update.message.reply_text(
-        initial_text,
-        parse_mode="MarkdownV2",
+        f"*OpenCode Terminal — {name}*\n\nConnecting...",
+        parse_mode="Markdown",
         reply_markup=kb_terminal(uid),
     )
-
-    # Store as the terminal message for this user
     _terminal_msg[uid] = (sent.chat_id, sent.message_id)
     _last_sent[uid] = ""
 
-    # Launch agy
-    tmux_send(uid, "agy")
+    # Only launch opencode if not already running
+    if not is_tmux_running_cmd(uid):
+        tmux_send(uid, "opencode")
 
-    # Start (or restart) the polling loop
     ensure_poll_loop(uid, context)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /status
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("⛔ Unauthorized.")
+        await update.message.reply_text("Unauthorized.")
         return
 
-    s = await get_state(uid)
-    auth_st = s.get("auth_state", "none")
-    name = update.effective_user.first_name or "User"
-
-    if auth_st == "authenticated":
-        ts = s.get("logged_in_at")
-        since = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if ts else "unknown"
-        status = f"🟢 Authenticated since {since}"
-    else:
-        status = "🔴 Not authenticated"
-
-    poller_alive = uid in _poll_tasks and not _poll_tasks[uid].done()
-    has_terminal = uid in _terminal_msg
+    name  = update.effective_user.first_name or "User"
+    alive = uid in _poll_tasks and not _poll_tasks[uid].done()
+    has_t = uid in _terminal_msg
+    cmd   = ""
+    try:
+        session = _session(uid)
+        res = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", f"{session}:0.0", "-F",
+             "#{pane_current_command}"],
+            capture_output=True, text=True, timeout=2,
+        )
+        cmd = res.stdout.strip()
+    except Exception:
+        pass
 
     await update.message.reply_text(
-        f"*Antigravity — Session Status*\n\n"
-        f"👤 `{name}`\n"
-        f"{status}\n"
-        f"📡 Poller: {'running' if poller_alive else 'stopped'}\n"
-        f"🖥 Terminal: {'active' if has_terminal else 'none'}\n\n"
-        f"Commands: /start /logout /cancel /clear /list /download",
+        f"*OpenCode — Session Status*\n\n"
+        f"User: `{name}`\n"
+        f"Poller: {'running' if alive else 'stopped'}\n"
+        f"Terminal msg: {'active' if has_t else 'none'}\n"
+        f"Running: `{cmd or 'bash'}`\n\n"
+        f"/start  /cancel  /clear  /list  /download",
         parse_mode="Markdown",
     )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# /logout
-# ─────────────────────────────────────────────────────────────────────────────
-
-async def cmd_logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = str(update.effective_user.id)
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("⛔ Unauthorized.")
-        return
-
-    await mark_logged_out(uid)
-    tmux_send(uid, "agy logout")
-
-    # Clear terminal message tracking
-    _terminal_msg.pop(uid, None)
-    _last_sent.pop(uid, None)
-
-    await update.message.reply_text(
-        "🔴 *Logged out.*\n\nSession ended. Use /start to reconnect.",
-        parse_mode="Markdown",
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /cancel
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if not is_authorized(update.effective_user.id):
         return
     tmux_interrupt(uid)
-    await update.message.reply_text("🛑 Ctrl-C sent.")
+    await update.message.reply_text("Ctrl-C sent.")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /clear
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if not is_authorized(update.effective_user.id):
         return
-    # Force next poll to update
+    tmux_clear(uid)
     _last_sent[uid] = ""
-    await update.message.reply_text("🗑 Screen buffer reset — refreshing terminal…")
+    await update.message.reply_text("Screen cleared.")
 
+# ---------------------------------------------------------------------------
+# /run
+# ---------------------------------------------------------------------------
+async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = str(update.effective_user.id)
+    if not is_authorized(update.effective_user.id):
+        return
+    cmd = " ".join(context.args) if context.args else "opencode"
+    oc.start_for_user(uid)
+    ensure_poll_loop(uid, context)
+    tmux_send(uid, cmd)
+    _last_sent[uid] = ""
+    if uid not in _terminal_msg:
+        sent = await update.message.reply_text("```\n...\n```",
+                                                parse_mode="Markdown",
+                                                reply_markup=kb_terminal(uid))
+        _terminal_msg[uid] = (sent.chat_id, sent.message_id)
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /list
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("⛔ Unauthorized.")
+        await update.message.reply_text("Unauthorized.")
         return
 
-    ws = os.path.join(agy.sm.workspace_root, f"user_{uid}", "default")
+    ws = os.path.join(oc.sm.workspace_root, f"user_{uid}", "default")
     os.makedirs(ws, exist_ok=True)
     try:
         files = sorted(f for f in os.listdir(ws)
                        if os.path.isfile(os.path.join(ws, f)) and not f.startswith("."))
     except Exception as e:
-        await update.message.reply_text(f"❌ {e}")
+        await update.message.reply_text(f"Error: {e}")
         return
 
     if not files:
-        await update.message.reply_text("📁 Workspace is empty.")
+        await update.message.reply_text("Workspace is empty.")
         return
 
     lines = "\n".join(f"• `{f}`" for f in files)
     await update.message.reply_text(
-        f"📁 *Workspace Files ({len(files)}):*\n\n{lines}\n\n"
+        f"*Workspace Files ({len(files)}):*\n\n{lines}\n\n"
         f"Use `/download <filename>` to retrieve.",
         parse_mode="Markdown",
     )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # /download
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("⛔ Unauthorized.")
+        await update.message.reply_text("Unauthorized.")
         return
 
     if not context.args:
@@ -689,113 +495,77 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     filename = os.path.basename(" ".join(context.args))
-    ws = os.path.join(agy.sm.workspace_root, f"user_{uid}", "default")
+    ws = os.path.join(oc.sm.workspace_root, f"user_{uid}", "default")
     path = os.path.join(ws, filename)
 
     if not os.path.exists(path):
-        await update.message.reply_text(f"❌ `{filename}` not found.", parse_mode="Markdown")
+        await update.message.reply_text(f"`{filename}` not found.", parse_mode="Markdown")
         return
 
-    await update.message.reply_text(f"📤 Uploading `{filename}`...", parse_mode="Markdown")
+    await update.message.reply_text(f"Uploading `{filename}`...", parse_mode="Markdown")
     try:
         with open(path, "rb") as f:
             await update.message.reply_document(document=f, filename=filename)
     except Exception as e:
-        await update.message.reply_text(f"❌ Upload failed: {e}")
+        await update.message.reply_text(f"Upload failed: {e}")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main message handler
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Message handler
+# ---------------------------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("⛔ Unauthorized.")
+        await update.message.reply_text("Unauthorized.")
         return
 
-    ws = os.path.join(agy.sm.workspace_root, f"user_{uid}", "default")
+    ws = os.path.join(oc.sm.workspace_root, f"user_{uid}", "default")
     os.makedirs(ws, exist_ok=True)
 
-    # ── File upload ───────────────────────────────────────────────────────────
+    # File upload
     if update.message.document:
         doc = update.message.document
-        fn = doc.file_name
-        msg = await update.message.reply_text(f"📥 Saving `{fn}`...", parse_mode="Markdown")
+        fn  = doc.file_name
+        msg = await update.message.reply_text(f"Saving `{fn}`...", parse_mode="Markdown")
         try:
             f = await context.bot.get_file(doc.file_id)
             await f.download_to_drive(os.path.join(ws, fn))
-            await msg.edit_text(f"✅ Saved `{fn}` to workspace.", parse_mode="Markdown")
+            await msg.edit_text(f"Saved `{fn}` to workspace.", parse_mode="Markdown")
         except Exception as e:
-            await msg.edit_text(f"❌ {e}")
+            await msg.edit_text(f"Error: {e}")
         return
 
     if update.message.photo:
         photo = update.message.photo[-1]
         fn = f"photo_{int(time.time())}.jpg"
-        msg = await update.message.reply_text("📸 Saving image...")
+        msg = await update.message.reply_text("Saving image...")
         try:
             f = await context.bot.get_file(photo.file_id)
             await f.download_to_drive(os.path.join(ws, fn))
-            await msg.edit_text(f"✅ Saved as `{fn}`.", parse_mode="Markdown")
+            await msg.edit_text(f"Saved as `{fn}`.", parse_mode="Markdown")
         except Exception as e:
-            await msg.edit_text(f"❌ {e}")
+            await msg.edit_text(f"Error: {e}")
         return
 
-    # ── Text input ────────────────────────────────────────────────────────────
+    # Text input — send to tmux
     text = (update.message.text or "").strip()
     if not text:
         return
 
-    # Ensure session alive and polling
-    agy.start_for_user(uid)
+    oc.start_for_user(uid)
     ensure_poll_loop(uid, context)
-
-    auth_st = await get_auth_state(uid)
-
-    # ── Google auth code paste ────────────────────────────────────────────────
-    if is_auth_code(text):
-        logger.info(f"[Auth] Code paste from {uid} (state={auth_st})")
-        await set_auth_state(uid, "code_sent")
-        await clear_auth_url(uid)
-        tmux_send(uid, text, enter=True)
-        # Acknowledge — poll loop will automatically update the terminal message
-        await update.message.reply_text(
-            "✅ *Code sent to CLI.* Verifying with Google…\n"
-            "The terminal will update automatically.",
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── Any text while URL is shown but isn't a valid code ────────────────────
-    if auth_st == "url_shown":
-        await update.message.reply_text(
-            "⚠️ Waiting for your Google authorization code.\n\n"
-            "Please complete the Google sign-in flow and paste the authorization "
-            "code here. It looks like: `4/0AX...`",
-            parse_mode="Markdown",
-        )
-        return
-
-    # ── Normal CLI input ──────────────────────────────────────────────────────
-    # Send to tmux — poll loop automatically picks up the output
     tmux_send(uid, text, enter=True)
-    # No need to reply — the terminal message updates automatically
-    # But if there's no terminal message yet, send one
+    _last_sent[uid] = ""
+
+    # Create a terminal message if none exists
     if uid not in _terminal_msg:
         sent = await update.message.reply_text(
-            "```\n...\n```",
-            parse_mode="Markdown",
-            reply_markup=kb_terminal(uid),
+            "```\n...\n```", parse_mode="Markdown", reply_markup=kb_terminal(uid)
         )
         _terminal_msg[uid] = (sent.chat_id, sent.message_id)
-        _last_sent[uid] = ""
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Callback handler
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -804,95 +574,50 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
 
-    action = query.data
+    action  = query.data
     chat_id = query.message.chat_id
     msg_id  = query.message.message_id
-    logger.debug(f"[CB] {uid} → {action}")
 
-    agy.start_for_user(uid)
+    logger.debug(f"[CB] {uid} -> {action}")
+
+    oc.start_for_user(uid)
     ensure_poll_loop(uid, context)
-
-    # Set this as the terminal message if user clicks a button on it
     _terminal_msg[uid] = (chat_id, msg_id)
 
     if action.startswith("key_"):
         tmux_key(uid, action[4:])
-        # Poll loop will update the terminal message automatically
-        # But force a refresh quicker by resetting last_sent
-        _last_sent[uid] = ""
+        _last_sent[uid] = ""   # force immediate refresh on next poll
 
     elif action == "ctrl_interrupt":
         tmux_interrupt(uid)
-        auth_st = await get_auth_state(uid)
-        if auth_st in ("url_shown", "code_sent"):
-            await set_auth_state(uid, "none")
-            await clear_auth_url(uid)
         _last_sent[uid] = ""
 
     elif action == "ctrl_refresh":
-        # Force immediate update
-        auth_st = await get_auth_state(uid)
-        raw = tmux_capture(uid, lines=CAPTURE_LINES)
-
-        if auth_st == "code_sent":
-            url = detect_google_url(raw)
-            if not url and not has_code_prompt(raw):
-                await mark_authenticated(uid)
-                logger.info(f"[Auth] Refresh confirmed auth complete for {uid}")
-
-        # Reset sentinel so poll loop sends it fresh
         _last_sent[uid] = ""
+        raw  = tmux_capture(uid, lines=CAPTURE_LINES)
+        text = format_terminal(raw)
+        await _edit(context, chat_id, msg_id, text, kb_terminal(uid))
 
-        # Also do an immediate edit right now (don't wait for next poll)
-        auth_st = await get_auth_state(uid)
-        url = detect_google_url(raw)
-        if auth_st == "url_shown" and url:
-            text = (
-                "🔑 *Antigravity — Authorization Required*\n\n"
-                "1\\. Tap *Authorize with Google* below\n"
-                "2\\. Complete sign\\-in in your browser\n"
-                "3\\. Copy the authorization code\n"
-                "4\\. *Paste it here* — it will be sent to the CLI automatically"
-            )
-            await _edit(context, chat_id, msg_id, text, kb_auth(url), "MarkdownV2")
-        else:
-            text = format_terminal(raw)
-            await _edit(context, chat_id, msg_id, text, kb_terminal(uid))
-
-    elif action == "ctrl_agy":
-        tmux_send(uid, "agy")
+    elif action == "ctrl_launch":
+        if not is_tmux_running_cmd(uid):
+            tmux_send(uid, "opencode")
         _last_sent[uid] = ""
 
     elif action == "ctrl_clear":
+        tmux_clear(uid)
         _last_sent[uid] = ""
         await _edit(context, chat_id, msg_id,
-                    "```\n(refreshing...)\n```",
-                    kb_terminal(uid))
+                    "```\n(screen cleared)\n```", kb_terminal(uid))
 
-    elif action == "ctrl_logout":
-        await mark_logged_out(uid)
-        tmux_send(uid, "agy logout")
-        _terminal_msg.pop(uid, None)
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id, message_id=msg_id,
-                text="🔴 *Logged out.*\n\nUse /start to reconnect.",
-                parse_mode="Markdown",
-            )
-        except Exception:
-            pass
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Bot registration helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Bot registration
+# ---------------------------------------------------------------------------
 BOT_COMMANDS = [
-    BotCommand("start",    "Connect & launch Antigravity CLI"),
+    BotCommand("start",    "Connect & launch OpenCode terminal"),
     BotCommand("status",   "Show session status"),
-    BotCommand("logout",   "End session & clear auth"),
-    BotCommand("cancel",   "Send Ctrl-C to CLI"),
-    BotCommand("clear",    "Reset terminal screen"),
+    BotCommand("run",      "Run a shell command"),
+    BotCommand("cancel",   "Send Ctrl-C to terminal"),
+    BotCommand("clear",    "Clear terminal screen"),
     BotCommand("list",     "List workspace files"),
     BotCommand("download", "Download file from workspace"),
 ]
@@ -901,7 +626,7 @@ BOT_COMMANDS = [
 def _register(app) -> None:
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("status",   cmd_status))
-    app.add_handler(CommandHandler("logout",   cmd_logout))
+    app.add_handler(CommandHandler("run",      cmd_run))
     app.add_handler(CommandHandler("cancel",   cmd_cancel))
     app.add_handler(CommandHandler("clear",    cmd_clear))
     app.add_handler(CommandHandler("list",     cmd_list))
@@ -915,19 +640,17 @@ def _register(app) -> None:
         )
     )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # FastAPI async integration
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 telegram_app = None
 
 
 async def run_bot_async() -> None:
     global telegram_app
-    logger.info("Starting Antigravity Bot (async)…")
+    logger.info("Starting OpenCode Telegram Bot...")
     try:
-        token = os.getenv("BOT_TOKEN") or settings.bot_token
+        token = os.getenv("BOT_TOKEN") or getattr(settings, "bot_token", None)
         if not token:
             logger.warning("BOT_TOKEN not set — bot will not start.")
             return
@@ -950,7 +673,7 @@ async def run_bot_async() -> None:
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
         )
-        logger.info("✅ Bot running!")
+        logger.info("OpenCode Bot is running!")
     except Exception as e:
         logger.error(f"FATAL: {e}", exc_info=True)
 
@@ -958,6 +681,7 @@ async def run_bot_async() -> None:
 async def stop_bot_async() -> None:
     global telegram_app
     if telegram_app:
+        logger.info("Stopping OpenCode Bot...")
         try:
             await telegram_app.updater.stop()
             await telegram_app.stop()
@@ -966,21 +690,17 @@ async def stop_bot_async() -> None:
             logger.error(f"Shutdown error: {e}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Standalone entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
 def main() -> None:
     import asyncio as _aio
-    from core.state_store import init_db, close_db
 
     async def _run():
-        await init_db()
-        token = os.getenv("BOT_TOKEN") or settings.bot_token
+        token = os.getenv("BOT_TOKEN") or getattr(settings, "bot_token", None)
         if not token:
             logger.error("BOT_TOKEN not set.")
             return
-
         base_url = os.getenv("TELEGRAM_BASE_URL")
         builder = ApplicationBuilder().token(token)
         if base_url:
@@ -991,13 +711,8 @@ def main() -> None:
             await app.bot.set_my_commands(BOT_COMMANDS)
         except Exception:
             pass
-        logger.info("Starting bot (standalone polling)…")
-        try:
-            app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        except Exception:
-            logger.exception("Bot crashed.")
-        finally:
-            await close_db()
+        logger.info("Starting bot (standalone)...")
+        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
     _aio.run(_run())
 

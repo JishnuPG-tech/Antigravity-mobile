@@ -5,11 +5,10 @@ echo "Entrypoint: preparing environment..."
 
 # Ensure /data exists and is writable
 mkdir -p /data /data/workspaces /data/bin /data/logs 2>/dev/null || true
-mkdir -p /tmp/antigravity-workspaces /tmp/antigravity-bin /tmp/antigravity-logs
 
 DATA_ROOT="/data"
 if [ ! -w /data ]; then
-    echo "/data is not writable; falling back to /tmp for runtime files"
+    echo "/data is not writable; falling back to /tmp"
     DATA_ROOT="/tmp"
 fi
 
@@ -17,30 +16,28 @@ export PYTHONPATH="/app:${PYTHONPATH:-}"
 export WORKSPACE_PATH="${WORKSPACE_PATH:-$DATA_ROOT/workspaces}"
 mkdir -p "$WORKSPACE_PATH" "$DATA_ROOT/bin" "$DATA_ROOT/logs" 2>/dev/null || true
 
-# Pre-configure Antigravity CLI theme to avoid interactive color-scheme prompt
-mkdir -p /root/.gemini/antigravity-cli /home/appuser/.gemini/antigravity-cli 2>/dev/null || true
-echo '{"colorScheme": "dark"}' > /root/.gemini/antigravity-cli/settings.json || true
-echo '{"colorScheme": "dark"}' > /home/appuser/.gemini/antigravity-cli/settings.json || true
-chown -R appuser:appuser /home/appuser/.gemini 2>/dev/null || true
-
-
-install_antigravity_async() {
-    echo "Installing Antigravity CLI asynchronously..."
-    if curl -fsSL https://antigravity.google/cli/install.sh -o /tmp/install.sh; then
-        timeout 180 bash /tmp/install.sh >>"$DATA_ROOT/logs/antigravity-install.log" 2>&1 || true
-        if [ -f "$HOME/.local/bin/agy" ]; then
-            cp "$HOME/.local/bin/agy" "$DATA_ROOT/bin/agy" || true
-            chmod +x "$DATA_ROOT/bin/agy" || true
-            ln -sf "$DATA_ROOT/bin/agy" /usr/local/bin/agy || true
-        fi
+install_opencode_async() {
+    echo "Installing OpenCode CLI asynchronously..."
+    local LOG="$DATA_ROOT/logs/opencode-install.log"
+    if curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh 2>>"$LOG"; then
+        timeout 180 bash /tmp/opencode-install.sh >>"$LOG" 2>&1 || true
+        # Try common install locations
+        for BIN in "$HOME/.local/bin/opencode" "/usr/local/bin/opencode" "$DATA_ROOT/bin/opencode"; do
+            if [ -f "$BIN" ]; then
+                cp "$BIN" "$DATA_ROOT/bin/opencode" 2>/dev/null || true
+                chmod +x "$DATA_ROOT/bin/opencode" 2>/dev/null || true
+                ln -sf "$DATA_ROOT/bin/opencode" /usr/local/bin/opencode 2>/dev/null || true
+                echo "OpenCode installed: $BIN" >>"$LOG"
+                break
+            fi
+        done
     else
-        echo "Antigravity installer download failed" >>"$DATA_ROOT/logs/antigravity-install.log"
+        echo "OpenCode installer download failed" >>"$LOG"
     fi
 }
 
-# Do not block Space startup on CLI installation.
-install_antigravity_async &
+# Install in the background — don't block server startup
+install_opencode_async &
 
-echo "Starting uvicorn"
+echo "Starting uvicorn on port ${PORT:-7860}..."
 exec uvicorn backend.app.main:app --host 0.0.0.0 --port "${PORT:-7860}" --log-level info
-
