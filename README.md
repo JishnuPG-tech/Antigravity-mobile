@@ -1,33 +1,21 @@
 ---
-title: Antigravity Telegram Bridge
-emoji: "🪄"
-colorFrom: blue
-colorTo: purple
+title: Opencode CLI
+emoji: 🖥️
+colorFrom: green
+colorTo: blue
 sdk: docker
-sdk_version: "latest"
-app_file: app.py
+app_port: 7860
 pinned: false
 ---
 
-# Antigravity Telegram Bridge
+# Opencode CLI - Web Console & Telegram Bridge
 
----
-title: Antigravity Telegram Bridge
-sdk: docker
-emoji: "🪄"
-license: mit
----
+A production-ready FastAPI backend, Web Console, and Telegram Bot bridge for the [OpenCode AI coding agent](https://opencode.ai). This Space runs the OpenCode CLI inside a Docker container.
 
-Production-ready scaffold to control the Antigravity CLI remotely via Telegram.
+## Features
 
-This repository provides a FastAPI backend, an async Telegram bot, and a session
-manager that keeps a persistent `tmux` session running the Antigravity CLI (`agy`).
-
-Key features
-- Persistent per-user tmux sessions running `agy`.
-- Streaming terminal output to Telegram chats.
-- File upload/download and workspace isolation per Telegram chat.
-- Docker + Supervisor for production deployment.
-
-See `README_SETUP.md` for installation and quick start instructions.
-# Angigravity-Mobile
+- Full OpenCode CLI access via Web Terminal (`/webapp` route)
+- Telegram Bot Bridge with persistent tmux sessions per user
+- WebSocket-based terminal streaming with fast change detection
+- Auto-sleep/auto-resume (5-minute inactivity timeout) to conserve Space memory
+- Production deployment with Docker & Supervisor
