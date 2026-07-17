@@ -152,13 +152,3 @@ async def websocket_session(websocket: WebSocket, user_id: str):
             await websocket.close()
         except Exception:
             pass
-
-
-@router.get("/debug/find-opencode")
-async def find_opencode():
-    import subprocess
-    try:
-        res = subprocess.run(["find", "/", "-name", "opencode"], capture_output=True, text=True, timeout=10)
-        return {"paths": res.stdout.splitlines()}
-    except Exception as e:
-        return {"error": str(e)}
