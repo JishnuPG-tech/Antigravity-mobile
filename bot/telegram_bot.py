@@ -45,6 +45,10 @@ oc = OpencodeManager()
 _terminal_msg: dict[str, tuple[int, int]] = {}   # uid -> (chat_id, msg_id)
 _last_sent:    dict[str, str]             = {}   # uid -> last text sent to Telegram
 _poll_tasks:   dict[str, asyncio.Task]    = {}   # uid -> background poll task
+_last_activity: dict[str, float]          = {}   # uid -> last active timestamp
+
+def update_activity(uid: str) -> None:
+    _last_activity[uid] = time.time()
 
 # ---------------------------------------------------------------------------
 # Config
@@ -265,6 +269,7 @@ async def _poll_loop(uid: str, context) -> None:
     - Resetting _last_sent[uid] = "" from a callback forces immediate refresh
     """
     logger.info(f"[Poll] Started for user {uid}")
+    update_activity(uid)
     last_edit_time = 0.0
     if uid not in _last_sent:
         _last_sent[uid] = ""
@@ -272,6 +277,17 @@ async def _poll_loop(uid: str, context) -> None:
     try:
         while True:
             await asyncio.sleep(POLL_INTERVAL)
+
+            # Check if idle for > 5 minutes (300 seconds)
+            if time.time() - _last_activity.get(uid, 0.0) > 300:
+                logger.info(f"[Poll] Stopping idle poller for user {uid}")
+                if uid in _terminal_msg:
+                    chat_id, msg_id = _terminal_msg[uid]
+                    raw = tmux_capture(uid, lines=CAPTURE_LINES)
+                    text = format_terminal(raw)
+                    sleep_msg = text + "\n\n*(Terminal session paused due to inactivity. Send any message to wake it up!)*"
+                    await _edit(context, chat_id, msg_id, sleep_msg, None)
+                break
 
             if uid not in _terminal_msg:
                 continue
@@ -308,6 +324,7 @@ def ensure_poll_loop(uid: str, context) -> None:
 # ---------------------------------------------------------------------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    update_activity(uid)
     name = update.effective_user.first_name or "User"
 
     if not is_authorized(update.effective_user.id):
@@ -372,6 +389,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    update_activity(uid)
     if not is_authorized(update.effective_user.id):
         return
     tmux_interrupt(uid)
@@ -382,6 +400,7 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    update_activity(uid)
     if not is_authorized(update.effective_user.id):
         return
     tmux_clear(uid)
@@ -393,6 +412,7 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    update_activity(uid)
     if not is_authorized(update.effective_user.id):
         return
     cmd = " ".join(context.args) if context.args else "opencode"
@@ -440,6 +460,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    update_activity(uid)
     if not is_authorized(update.effective_user.id):
         await update.message.reply_text("Unauthorized.")
         return
@@ -468,6 +489,7 @@ async def cmd_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
+    update_activity(uid)
     if not is_authorized(update.effective_user.id):
         await update.message.reply_text("Unauthorized.")
         return
@@ -623,10 +645,22 @@ async def run_bot_async() -> None:
         except Exception:
             pass
         await telegram_app.start()
-        await telegram_app.updater.start_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-        )
+        
+        public_url = os.getenv("RENDER_EXTERNAL_URL")
+        if public_url:
+            webhook_url = f"{public_url.rstrip('/')}/api/telegram-webhook"
+            logger.info(f"Setting Telegram webhook to: {webhook_url}")
+            await telegram_app.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
+        else:
+            logger.info("No RENDER_EXTERNAL_URL found — starting polling mode.")
+            await telegram_app.updater.start_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+            )
         logger.info("OpenCode Bot is running!")
     except Exception as e:
         logger.error(f"FATAL: {e}", exc_info=True)
@@ -637,7 +671,8 @@ async def stop_bot_async() -> None:
     if telegram_app:
         logger.info("Stopping OpenCode Bot...")
         try:
-            await telegram_app.updater.stop()
+            if telegram_app.updater and telegram_app.updater.running:
+                await telegram_app.updater.stop()
             await telegram_app.stop()
             await telegram_app.shutdown()
         except Exception as e:

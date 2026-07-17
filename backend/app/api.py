@@ -2,7 +2,7 @@ import logging
 import subprocess
 import asyncio
 
-from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel
 from backend.app.config import settings
 from core.session_manager import SessionManager
@@ -231,3 +231,18 @@ async def debug_test_run():
         results["run"] = {"error": str(e)}
 
     return results
+
+
+@router.post("/telegram-webhook")
+async def telegram_webhook(request: Request):
+    from fastapi import Request
+    from telegram import Update
+    from bot.telegram_bot import telegram_app
+    if telegram_app:
+        try:
+            data = await request.json()
+            update = Update.de_json(data, telegram_app.bot)
+            await telegram_app.process_update(update)
+        except Exception as e:
+            logger.error(f"Error processing webhook update: {e}")
+    return {"status": "ok"}
