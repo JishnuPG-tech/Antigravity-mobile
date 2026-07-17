@@ -287,10 +287,9 @@ async def _poll_loop(uid: str, context) -> None:
             time_ok = (now - last_edit_time) >= MIN_EDIT_GAP
 
             if changed and time_ok:
-                ok = await _edit(context, chat_id, msg_id, text, markup)
-                if ok:
-                    _last_sent[uid] = text
-                    last_edit_time = now
+                await _edit(context, chat_id, msg_id, text, markup)
+                _last_sent[uid] = text
+                last_edit_time = now
 
     except asyncio.CancelledError:
         logger.info(f"[Poll] Stopped for user {uid}")
