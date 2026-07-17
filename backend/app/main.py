@@ -1,10 +1,14 @@
 from contextlib import asynccontextmanager
 from backend.app.handlers import healthz
 from bot.telegram_bot import run_bot_async, stop_bot_async
+from core.state_store import init_db, close_db
+
 
 @asynccontextmanager
 async def lifespan(app):
     import asyncio
+    # Initialize persistent state database
+    await init_db()
     # Start Telegram Bot in the background using FastAPI's event loop
     bot_task = asyncio.create_task(run_bot_async())
     yield
@@ -15,6 +19,8 @@ async def lifespan(app):
         await bot_task
     except asyncio.CancelledError:
         pass
+    await close_db()
+
 
 try:
     from fastapi import FastAPI
@@ -40,8 +46,7 @@ try:
     @app.get("/healthz")
     async def health():
         return await healthz()
+
 except Exception:
     # FastAPI may not be installed in lightweight test environments.
     app = None
-
-
