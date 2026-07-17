@@ -225,55 +225,10 @@ def tmux_clear(uid: str) -> None:
         pass
 
 # ---------------------------------------------------------------------------
-# Keyboards
-# ---------------------------------------------------------------------------
-def kb_terminal(uid: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("↑", callback_data="key_Up")],
-        [
-            InlineKeyboardButton("←",        callback_data="key_Left"),
-            InlineKeyboardButton("↵ Enter",  callback_data="key_Enter"),
-            InlineKeyboardButton("→",        callback_data="key_Right"),
-        ],
-        [
-            InlineKeyboardButton("↓",        callback_data="key_Down"),
-            InlineKeyboardButton("⇥ Tab",    callback_data="key_Tab"),
-            InlineKeyboardButton("⌫ BS",     callback_data="key_BSpace"),
-        ],
-        [
-            InlineKeyboardButton("ESC",      callback_data="key_Escape"),
-            InlineKeyboardButton("^C",       callback_data="key_ctrl_c"),
-            InlineKeyboardButton("^D",       callback_data="key_ctrl_d"),
-            InlineKeyboardButton("^Z",       callback_data="key_ctrl_z"),
-        ],
-        [
-            InlineKeyboardButton("F1",  callback_data="key_F1"),
-            InlineKeyboardButton("F2",  callback_data="key_F2"),
-            InlineKeyboardButton("F3",  callback_data="key_F3"),
-            InlineKeyboardButton("F4",  callback_data="key_F4"),
-            InlineKeyboardButton("F5",  callback_data="key_F5"),
-        ],
-        [
-            InlineKeyboardButton("⇞ PgUp",  callback_data="key_PPage"),
-            InlineKeyboardButton("⇟ PgDn",  callback_data="key_NPage"),
-            InlineKeyboardButton("⇤ Home",  callback_data="key_Home"),
-            InlineKeyboardButton("End ⇥",   callback_data="key_End"),
-        ],
-        [
-            InlineKeyboardButton("🚀 Launch opencode", callback_data="ctrl_launch"),
-            InlineKeyboardButton("🔄 Refresh",         callback_data="ctrl_refresh"),
-        ],
-        [
-            InlineKeyboardButton("🛑 Stop (^C)",  callback_data="ctrl_interrupt"),
-            InlineKeyboardButton("🗑 Clear",      callback_data="ctrl_clear"),
-        ],
-    ])
-
-# ---------------------------------------------------------------------------
 # Safe Telegram edit
 # ---------------------------------------------------------------------------
 async def _edit(context, chat_id: int, msg_id: int,
-                text: str, markup: InlineKeyboardMarkup,
+                text: str, markup: InlineKeyboardMarkup = None,
                 parse_mode: str = "Markdown") -> bool:
     try:
         await context.bot.edit_message_text(
@@ -325,7 +280,7 @@ async def _poll_loop(uid: str, context) -> None:
             # Get current terminal state from tmux (full terminal emulation done by tmux)
             raw = tmux_capture(uid, lines=CAPTURE_LINES)
             text = format_terminal(raw)
-            markup = kb_terminal(uid)
+            markup = None
 
             now = time.monotonic()
             changed = (text != _last_sent.get(uid, ""))
@@ -368,7 +323,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent = await update.message.reply_text(
         f"*OpenCode Terminal — {name}*\n\nConnecting...",
         parse_mode="Markdown",
-        reply_markup=kb_terminal(uid),
+        reply_markup=None,
     )
     _terminal_msg[uid] = (sent.chat_id, sent.message_id)
     _last_sent[uid] = ""
@@ -449,7 +404,7 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid not in _terminal_msg:
         sent = await update.message.reply_text("```\n...\n```",
                                                 parse_mode="Markdown",
-                                                reply_markup=kb_terminal(uid))
+                                                reply_markup=None)
         _terminal_msg[uid] = (sent.chat_id, sent.message_id)
 
 # ---------------------------------------------------------------------------
@@ -559,7 +514,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Create a terminal message if none exists
     if uid not in _terminal_msg:
         sent = await update.message.reply_text(
-            "```\n...\n```", parse_mode="Markdown", reply_markup=kb_terminal(uid)
+            "```\n...\n```", parse_mode="Markdown", reply_markup=None
         )
         _terminal_msg[uid] = (sent.chat_id, sent.message_id)
 
@@ -596,7 +551,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _last_sent[uid] = ""
         raw  = tmux_capture(uid, lines=CAPTURE_LINES)
         text = format_terminal(raw)
-        await _edit(context, chat_id, msg_id, text, kb_terminal(uid))
+        await _edit(context, chat_id, msg_id, text, None)
 
     elif action == "ctrl_launch":
         if not is_tmux_running_cmd(uid):
@@ -607,7 +562,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tmux_clear(uid)
         _last_sent[uid] = ""
         await _edit(context, chat_id, msg_id,
-                    "```\n(screen cleared)\n```", kb_terminal(uid))
+                    "```\n(screen cleared)\n```", None)
 
 # ---------------------------------------------------------------------------
 # Bot registration
