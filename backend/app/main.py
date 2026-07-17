@@ -31,7 +31,7 @@ try:
     app = FastAPI(title="Antigravity Bridge", lifespan=lifespan)
     app.include_router(api_router, prefix="/api")
 
-    @app.get("/")
+    @app.api_route("/", methods=["GET", "HEAD"])
     async def root():
         return {
             "status": "ok",
@@ -43,7 +43,7 @@ try:
     async def get_webapp():
         return HTML_CONTENT
 
-    @app.get("/healthz")
+    @app.api_route("/healthz", methods=["GET", "HEAD"])
     async def health():
         return await healthz()
 
