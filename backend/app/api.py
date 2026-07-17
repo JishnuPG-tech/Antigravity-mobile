@@ -139,7 +139,7 @@ async def websocket_session(websocket: WebSocket, user_id: str):
     async def stream_to_client():
         try:
             async for chunk in sm.stream_output(user_id):
-                display, is_card = clean_terminal_output(chunk)
+                display, is_card = clean_terminal_output(chunk, keep_whitespace=True)
                 if display:
                     await websocket.send_json({
                         "type": "output",
