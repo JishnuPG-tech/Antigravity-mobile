@@ -22,7 +22,7 @@ install_opencode_async() {
     if curl -fsSL https://opencode.ai/install -o /tmp/opencode-install.sh 2>>"$LOG"; then
         timeout 180 bash /tmp/opencode-install.sh >>"$LOG" 2>&1 || true
         # Try common install locations
-        for BIN in "$HOME/.local/bin/opencode" "/usr/local/bin/opencode" "$DATA_ROOT/bin/opencode"; do
+        for BIN in "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode" "/usr/local/bin/opencode" "$DATA_ROOT/bin/opencode"; do
             if [ -f "$BIN" ]; then
                 cp "$BIN" "$DATA_ROOT/bin/opencode" 2>/dev/null || true
                 chmod +x "$DATA_ROOT/bin/opencode" 2>/dev/null || true
