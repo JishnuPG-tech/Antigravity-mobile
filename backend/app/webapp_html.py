@@ -1,24 +1,24 @@
 HTML_CONTENT = r"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Antigravity Console</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+    <title>Antigravity Web Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
             /* Theme Green Matrix (default) */
-            --bg-base: #050507;
-            --term-bg: #020203;
+            --bg-base: #000000;
+            --term-bg: #020402;
             --text-color: #39FF14;
-            --accent-color: #39FF14;
-            --border-color: rgba(57, 255, 20, 0.25);
-            --panel-bg: rgba(2, 2, 3, 0.85);
+            --accent-color: #00ff9c;
+            --border-color: rgba(57, 255, 20, 0.2);
+            --panel-bg: #0e1418;
             --btn-bg: rgba(57, 255, 20, 0.05);
-            
-            --text-secondary: #8E8E9F;
-            --accent-red: #FF3366;
-            --card-border: rgba(56, 56, 74, 0.5);
+            --glow-color: rgba(0, 255, 156, 0.3);
+            --on-surface: #dde3e9;
+            --text-secondary: #8e8e9f;
         }
 
         /* Tokyo Night Theme */
@@ -28,30 +28,39 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             --text-color: #7aa2f7;
             --accent-color: #bb9af3;
             --border-color: #292e42;
-            --panel-bg: rgba(22, 22, 30, 0.85);
+            --panel-bg: #16161e;
             --btn-bg: rgba(187, 154, 243, 0.08);
+            --glow-color: rgba(187, 154, 243, 0.3);
+            --on-surface: #a9b1d6;
+            --text-secondary: #565f89;
         }
 
         /* Solarized Dark Theme */
         [data-theme="solarized"] {
-            --bg-base: #002b36;
+            --bg-base: #00212b;
             --term-bg: #073642;
             --text-color: #93a1a1;
             --accent-color: #2aa198;
             --border-color: #586e75;
-            --panel-bg: rgba(7, 54, 66, 0.85);
+            --panel-bg: #073642;
             --btn-bg: rgba(42, 161, 152, 0.08);
+            --glow-color: rgba(42, 161, 152, 0.3);
+            --on-surface: #93a1a1;
+            --text-secondary: #586e75;
         }
 
         /* Amber CRT Theme */
         [data-theme="amber"] {
-            --bg-base: #0c0700;
-            --term-bg: #060300;
+            --bg-base: #000000;
+            --term-bg: #080500;
             --text-color: #FFB000;
             --accent-color: #FFB000;
             --border-color: #3d2a00;
-            --panel-bg: rgba(6, 3, 0, 0.85);
+            --panel-bg: #0f0a00;
             --btn-bg: rgba(255, 176, 0, 0.05);
+            --glow-color: rgba(255, 176, 0, 0.3);
+            --on-surface: #ffda79;
+            --text-secondary: #845e00;
         }
 
         * {
@@ -63,132 +72,139 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         body {
-            font-family: 'Outfit', sans-serif;
+            font-family: 'Geist', sans-serif;
             background: var(--bg-base);
-            color: var(--text-color);
+            color: var(--on-surface);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            padding: 12px;
             transition: background 0.3s, color 0.3s;
         }
 
-        header {
+        /* CRT Scanline Overlay */
+        .scanline {
+            width: 100%;
+            height: 100%;
+            z-index: 100;
+            background: linear-gradient(0deg, rgba(0, 0, 0, 0) 50%, rgba(255, 255, 255, 0.02) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+
+        /* System Dashboard Header */
+        .dashboard-header {
+            background-color: rgba(14, 20, 24, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 16px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px 4px 16px 4px;
+            z-index: 10;
         }
 
-        .logo-section {
+        .dashboard-metrics {
+            display: flex;
+            gap: 20px;
+            overflow-x: auto;
+        }
+
+        .metric-col {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .metric-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--accent-color);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 4px;
+            font-family: 'JetBrains Mono', monospace;
         }
 
-        .logo-dot {
-            width: 10px;
-            height: 10px;
+        .load-bar-bg {
+            width: 50px;
+            height: 6px;
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .load-bar-fill {
+            height: 100%;
             background-color: var(--accent-color);
-            border-radius: 50%;
-            box-shadow: 0 0 10px var(--accent-color);
-            animation: pulse 2s infinite;
-        }
-
-        h1 {
-            font-size: 1.25rem;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-            color: #FFF;
-        }
-
-        .header-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .btn-action {
-            font-size: 0.75rem;
-            font-weight: 600;
-            padding: 6px 12px;
-            border-radius: 20px;
-            background: rgba(255, 255, 255, 0.04);
-            color: var(--text-secondary);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .btn-action:active {
-            background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 6px var(--accent-color);
+            width: 42%;
+            transition: width 0.5s ease;
         }
 
         .status-badge {
-            font-size: 0.75rem;
-            font-weight: 600;
-            padding: 6px 12px;
-            border-radius: 20px;
-            background: rgba(57, 255, 20, 0.1);
-            color: #39FF14;
-            border: 1px solid rgba(57, 255, 20, 0.2);
             display: flex;
             align-items: center;
             gap: 6px;
+            padding: 4px 8px;
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
         }
 
         .status-dot {
             width: 6px;
             height: 6px;
-            background-color: #39FF14;
+            background-color: var(--text-color);
             border-radius: 50%;
+            box-shadow: 0 0 8px var(--text-color);
+            animation: pulse-glow 1.5s infinite;
         }
 
-        /* Console Container */
+        @keyframes pulse-glow {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+
+        /* Console View Container */
         .console-container {
             flex: 1;
             display: flex;
             flex-direction: column;
-            background: var(--panel-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 16px;
             overflow: hidden;
             position: relative;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
-            transition: border-color 0.3s;
-        }
-
-        /* CRT Scanline Visual Effect Overlay */
-        .scanlines {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
-            background-size: 100% 4px;
-            opacity: 0.04;
-            pointer-events: none;
-            z-index: 99;
         }
 
         /* Terminal Window */
         .terminal-window {
             flex: 1;
-            background-color: var(--term-bg);
-            padding: 14px;
-            font-family: 'Fira Code', monospace;
-            font-size: 0.85rem;
-            line-height: 1.4;
+            background-color: var(--bg-base);
+            padding: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-all;
-            border-bottom: 1px solid var(--border-color);
             color: var(--text-color);
-            transition: background-color 0.3s, color 0.3s, border-bottom 0.3s;
         }
 
-        /* Blinking Terminal Cursor */
         .cursor {
             display: inline-block;
             width: 8px;
@@ -196,6 +212,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             background-color: var(--text-color);
             margin-left: 2px;
             vertical-align: middle;
+            box-shadow: 0 0 6px var(--text-color);
             animation: blink 1s step-start infinite;
         }
 
@@ -203,74 +220,16 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             50% { opacity: 0; }
         }
 
-        /* Custom Scrollbar */
-        .terminal-window::-webkit-scrollbar {
-            width: 6px;
-        }
-        .terminal-window::-webkit-scrollbar-track {
-            background: var(--term-bg);
-        }
-        .terminal-window::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.06);
-            border-radius: 3px;
-        }
-
-        /* Login Card Layout */
-        .login-card {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            padding: 24px;
-            text-align: center;
-            gap: 16px;
-        }
-
-        .login-icon {
-            font-size: 3rem;
-            animation: bounce 2s infinite;
-        }
-
-        .login-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #FFF;
-        }
-
-        .login-desc {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            max-width: 280px;
-            line-height: 1.4;
-        }
-
-        .btn-login {
-            display: inline-block;
-            background: var(--accent-color);
-            color: #000;
-            font-weight: 600;
-            padding: 12px 28px;
-            border-radius: 30px;
-            text-decoration: none;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .btn-login:active {
-            transform: scale(0.95);
-        }
-
-        /* Keyboard Layout */
+        /* Control Panel */
         .control-panel {
-            padding: 14px;
+            padding: 12px;
             display: flex;
             flex-direction: column;
             gap: 10px;
-            background: rgba(0, 0, 0, 0.25);
+            background-color: var(--panel-bg);
+            border-t: 1px solid var(--border-color);
         }
 
-        /* Input Area */
         .input-row {
             display: flex;
             gap: 8px;
@@ -278,181 +237,299 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 
         .text-input {
             flex: 1;
-            background: rgba(255, 255, 255, 0.02);
+            background: rgba(0, 0, 0, 0.4);
             border: 1px solid var(--border-color);
-            border-radius: 10px;
+            border-radius: 8px;
             color: var(--text-color);
-            padding: 12px 16px;
-            font-family: inherit;
-            font-size: 0.95rem;
+            padding: 10px 14px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
             outline: none;
-            transition: border-color 0.2s;
         }
 
         .text-input:focus {
             border-color: var(--accent-color);
+            box-shadow: 0 0 8px var(--glow-color);
         }
 
         .btn-send {
-            background: var(--text-color);
+            background: var(--accent-color);
             color: #000;
             border: none;
-            border-radius: 10px;
+            border-radius: 8px;
             padding: 0 20px;
-            font-weight: 600;
-            font-size: 0.95rem;
+            font-weight: bold;
             cursor: pointer;
-            transition: opacity 0.2s;
         }
 
-        .btn-send:active {
-            opacity: 0.8;
-        }
-
-        /* Keypad Grid */
-        .keypad-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            max-width: 360px;
-            margin: 0 auto;
-            width: 100%;
+        /* Keypad Accessory Bar */
+        .keypad-row {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 4px;
         }
 
         .key-btn {
-            background: var(--btn-bg);
+            background-color: var(--btn-bg);
             border: 1px solid var(--border-color);
             color: var(--text-color);
-            border-radius: 10px;
-            padding: 12px;
-            font-family: inherit;
-            font-size: 0.95rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 11px;
+            font-weight: bold;
             cursor: pointer;
-            transition: background 0.1s, transform 0.1s, border-color 0.3s;
+            min-width: 50px;
+            text-align: center;
         }
 
         .key-btn:active {
-            background: rgba(255, 255, 255, 0.12);
-            transform: scale(0.95);
+            background-color: var(--accent-color);
+            color: #000;
         }
 
-        .key-btn.accent-blue {
+        /* Navigation Bar */
+        nav {
+            height: 56px;
+            border-top: 1px solid var(--border-color);
+            background-color: rgba(14, 20, 24, 0.9);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 9px;
+            text-transform: uppercase;
+            gap: 2px;
+            cursor: pointer;
+        }
+
+        .nav-item.active {
             color: var(--accent-color);
-            border-color: var(--border-color);
+            text-shadow: 0 0 6px var(--glow-color);
         }
 
-        .key-btn.accent-red {
-            color: var(--accent-red);
-            border-color: rgba(255, 51, 102, 0.3);
+        .nav-item .material-symbols-outlined {
+            font-size: 20px;
         }
 
-        @keyframes pulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 229, 255, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+        /* Settings view overlay */
+        .config-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--panel-bg);
+            z-index: 50;
+            padding: 24px;
+            display: none;
+            flex-direction: column;
+            gap: 16px;
         }
 
-        @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-8px); }
+        .config-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #FFF;
+            margin-bottom: 12px;
+        }
+
+        .config-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .config-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .config-input {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: #FFF;
+            padding: 10px;
+            outline: none;
+        }
+
+        .theme-select {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .theme-btn {
+            border: 1px solid var(--border-color);
+            background-color: transparent;
+            color: var(--text-secondary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .theme-btn.active {
+            border-color: var(--accent-color);
+            background-color: var(--btn-bg);
+            color: var(--accent-color);
+        }
+
+        .btn-save {
+            background-color: var(--accent-color);
+            color: #000;
+            font-weight: bold;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 12px;
         }
     </style>
 </head>
 <body>
-    <header>
-        <div class="logo-section">
-            <div class="logo-dot"></div>
-            <h1>Antigravity Console</h1>
-        </div>
-        <div class="header-actions">
-            <button class="btn-action" onclick="cycleTheme()">🎨 Theme</button>
-            <div class="status-badge" id="status-badge">
-                <div class="status-dot"></div>
-                <span>Connected</span>
-            </div>
-        </div>
-    </header>
+    <!-- CRT Scanline Effect -->
+    <div class="scanline"></div>
 
+    <!-- Top System Dashboard -->
+    <section class="dashboard-header">
+        <div class="dashboard-metrics">
+            <div class="metric-col">
+                <span class="metric-label">Active Model</span>
+                <span class="metric-value">
+                    <span class="material-symbols-outlined" style="font-size:12px;">neurology</span>
+                    ANTIGRAVITY-1.5-PRO
+                </span>
+            </div>
+            <div class="metric-col">
+                <span class="metric-label">System Load</span>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <div class="load-bar-bg"><div class="load-bar-fill" id="load-fill"></div></div>
+                    <span class="metric-value" style="font-size:10px;" id="load-text">42.8%</span>
+                </div>
+            </div>
+            <div class="metric-col">
+                <span class="metric-label">AI Latency</span>
+                <span class="metric-value" id="latency-text">284ms</span>
+            </div>
+        </div>
+        <div class="status-badge">
+            <div class="status-dot"></div>
+            <span>Stable</span>
+        </div>
+    </section>
+
+    <!-- Main Views -->
     <div class="console-container">
-        <!-- CRT scanline effect element -->
-        <div class="scanlines"></div>
-        
-        <div class="terminal-window" id="terminal">Initializing connection...<span class="cursor"></span></div>
-        
-        <div class="control-panel">
-            <div class="input-row">
-                <input type="text" id="command-input" class="text-input" placeholder="Type prompt or command here..." autocomplete="off">
-                <button id="btn-send" class="btn-send">Send</button>
-            </div>
+        <!-- Terminal Window View -->
+        <div class="terminal-window" id="terminal">Initializing tunnel connection...<span class="cursor"></span></div>
+
+        <!-- Setup Profile View (Config Overlay) -->
+        <div class="config-overlay" id="config-view">
+            <div class="config-title">Profile Configuration</div>
             
-            <div class="keypad-grid">
-                <!-- Row 1 -->
-                <button class="key-btn" onclick="sendKey('Tab')">⇥ Tab</button>
-                <button class="key-btn" onclick="sendKey('Up')">⬆️ Up</button>
-                <button class="key-btn" onclick="sendKey('BSpace')">⌫ Back</button>
-                
-                <!-- Row 2 -->
-                <button class="key-btn" onclick="sendKey('Left')">⬅️ Left</button>
-                <button class="key-btn" onclick="sendKey('Enter')">🆗 Enter</button>
-                <button class="key-btn" onclick="sendKey('Right')">➡️ Right</button>
-                
-                <!-- Row 3 -->
-                <button class="key-btn accent-red" onclick="interrupt()">🛑 Ctrl+C</button>
-                <button class="key-btn" onclick="sendKey('Down')">⬇️ Down</button>
-                <button class="key-btn accent-blue" onclick="refresh()">🔄 Refresh</button>
-                
-                <!-- Row 4 -->
-                <button class="key-btn" onclick="navigateHistory(1)">⏮️ Prev Hist</button>
-                <button class="key-btn" onclick="navigateHistory(-1)">⏭️ Next Hist</button>
-                <button class="key-btn accent-blue" onclick="launchAgy()">🚀 Launch agy</button>
+            <div class="config-group">
+                <label class="config-label">Telegram User ID</label>
+                <input type="text" class="config-input" id="userid-input" value="1769298522">
             </div>
+
+            <div class="config-group">
+                <label class="config-label">Active Theme Color Mode</label>
+                <div class="theme-select">
+                    <button class="theme-btn active" onclick="setTheme('matrix', this)">Matrix Green</button>
+                    <button class="theme-btn" onclick="setTheme('tokyo', this)">Tokyo Night</button>
+                    <button class="theme-btn" onclick="setTheme('solarized', this)">Solarized Dark</button>
+                    <button class="theme-btn" onclick="setTheme('amber', this)">Amber CRT</button>
+                </div>
+            </div>
+
+            <button class="btn-save" onclick="applyProfileSettings()">Apply Configuration</button>
         </div>
     </div>
 
+    <!-- Accessory Keypad Panel -->
+    <div class="control-panel" id="control-panel">
+        <div class="keypad-row">
+            <button class="key-btn" onclick="sendKey('Tab')">TAB</button>
+            <button class="key-btn" onclick="sendKey('Up')">UP (↑)</button>
+            <button class="key-btn" onclick="sendKey('Down')">DOWN (↓)</button>
+            <button class="key-btn" onclick="sendKey('Left')">LEFT (←)</button>
+            <button class="key-btn" onclick="sendKey('Right')">RIGHT (→)</button>
+            <button class="key-btn" onclick="sendKey('BSpace')">BKSP</button>
+            <button class="key-btn" onclick="sendKey('Enter')">ENTER</button>
+            <button class="key-btn" onclick="sendInterrupt()">CTRL+C</button>
+            <button class="key-btn" onclick="launchAgy()">LAUNCH AGY</button>
+        </div>
+        <div class="input-row">
+            <input type="text" id="command-input" class="text-input" placeholder="Type prompt or command here..." autocomplete="off">
+            <button class="btn-send" onclick="sendCommand()">Send</button>
+        </div>
+    </div>
+
+    <!-- Bottom Nav Bar -->
+    <nav>
+        <div class="nav-item active" id="nav-shell" onclick="switchView('shell')">
+            <span class="material-symbols-outlined">terminal</span>
+            <span>Shell</span>
+        </div>
+        <div class="nav-item" id="nav-config" onclick="switchView('config')">
+            <span class="material-symbols-outlined">settings</span>
+            <span>Config</span>
+        </div>
+    </nav>
+
     <script>
         const urlParams = new URLSearchParams(window.location.search);
-        const userId = urlParams.get('user_id');
+        const userId = urlParams.get('user_id') || '1769298522';
+        document.getElementById('userid-input').value = userId;
+
         const terminalEl = document.getElementById('terminal');
-        const statusBadge = document.getElementById('status-badge');
         const commandInput = document.getElementById('command-input');
-        const btnSend = document.getElementById('btn-send');
+        const configOverlay = document.getElementById('config-view');
+        const controlPanel = document.getElementById('control-panel');
 
-        // Command History Navigation
-        let history = [];
-        let historyIndex = -1;
+        let currentTheme = 'matrix';
 
-        // Dynamic Themes
-        const THEME_KEYS = ['matrix', 'tokyo', 'solarized', 'amber'];
-        let currentThemeIndex = 0;
+        function setTheme(themeKey, btn) {
+            currentTheme = themeKey;
+            document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
 
-        function cycleTheme() {
-            triggerHaptic();
-            currentThemeIndex = (currentThemeIndex + 1) % THEME_KEYS.length;
-            const themeKey = THEME_KEYS[currentThemeIndex];
-            if (themeKey === 'matrix') {
+        function applyProfileSettings() {
+            const id = document.getElementById('userid-input').value;
+            // Set global theme element
+            if (currentTheme === 'matrix') {
                 document.documentElement.removeAttribute('data-theme');
             } else {
-                document.documentElement.setAttribute('data-theme', themeKey);
+                document.documentElement.setAttribute('data-theme', currentTheme);
+            }
+            // Navigate back to shell
+            switchView('shell');
+        }
+
+        function switchView(viewName) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            if (viewName === 'shell') {
+                document.getElementById('nav-shell').classList.add('active');
+                configOverlay.style.display = 'none';
+                controlPanel.style.display = 'flex';
+            } else if (viewName === 'config') {
+                document.getElementById('nav-config').classList.add('active');
+                configOverlay.style.display = 'flex';
+                controlPanel.style.display = 'none';
             }
         }
 
-        // Haptic Feedback trigger
-        function triggerHaptic() {
-            if (navigator.vibrate) {
-                navigator.vibrate(12);
-            }
-        }
-
-        if (!userId) {
-            terminalEl.innerHTML = '<div class="login-card"><div class="login-icon">⚠️</div><div class="login-title">Missing User ID</div><div class="login-desc">Please open this console directly from the link sent by your Telegram bot.</div></div>';
-            statusBadge.style.display = 'none';
-        }
-
-        // Clean Terminal escape codes
         function cleanTerminal(text) {
             if (!text) return "";
             
@@ -460,26 +537,24 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             const match = text.match(/https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?[^\s'"\\<>]+/);
             if (match) {
                 let authUrl = match[0];
-                authUrl = authUrl.split(/[\\\[\]\s]/)[0]; // strip trailing codes
+                authUrl = authUrl.split(/[\\\[\]\s]/)[0];
                 authUrl = authUrl.replace(/\]8;;$/, '').replace(/\\$/, '').replace(/\]8$/, '');
                 
                 return `
-<div class="login-card">
-    <div class="login-icon">🔑</div>
-    <div class="login-title">Authentication Required</div>
-    <div class="login-desc">Please authorize your Google account to enable the Antigravity AI Agent to run.</div>
-    <a href="${authUrl}" target="_blank" class="btn-login">🔗 Log In (Google)</a>
-    <div class="login-desc" style="margin-top: 10px; font-size: 0.8rem;">After logging in, copy the code and paste it into the console input field below.</div>
+<div class="login-card" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:30px; text-align:center; gap:16px;">
+    <div style="font-size:3rem;">🔑</div>
+    <div style="font-size:1.2rem; font-weight:bold; color:#FFF;">Authentication Required</div>
+    <div style="color:var(--text-secondary); font-size:0.9rem;">Please authorize your Google account to enable the Antigravity AI Agent to run.</div>
+    <a href="${authUrl}" target="_blank" style="background:var(--accent-color); color:#000; font-weight:bold; padding:12px 28px; border-radius:30px; text-decoration:none;">🔗 Log In (Google)</a>
+    <div style="color:var(--text-secondary); font-size:0.8rem;">After logging in, copy the code and paste it into the console input field below.</div>
 </div>`;
             }
 
-            // Strip ANSI codes
-            let cleaned = text.replace(/\\x1b\\]8;[^\\x1b\\x07]*(?:\\x1b\\\\|\\x07)/g, ''); // OSC 8
-            cleaned = cleaned.replace(/\\x1b\\[[0-9;?]*[a-zA-Z]/g, ''); // CSI
-            cleaned = cleaned.replace(/\\x1b./g, ''); // ESC
-            cleaned = cleaned.replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]/g, ''); // control chars
+            let cleaned = text.replace(/\\x1b\\]8;[^\\x1b\\x07]*(?:\\x1b\\\\|\\x07)/g, '');
+            cleaned = cleaned.replace(/\\x1b\\[[0-9;?]*[a-zA-Z]/g, '');
+            cleaned = cleaned.replace(/\\x1b./g, '');
+            cleaned = cleaned.replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]/g, '');
             
-            // Leftovers
             cleaned = cleaned.replace(/\\[\\?2004[lh]/g, '');
             cleaned = cleaned.replace(/\\[[0-9;?]*[mJKhHdDL]/g, '');
             
@@ -487,7 +562,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         async function refresh() {
-            if (!userId) return;
             try {
                 const response = await fetch(`/api/sessions/${userId}/output?lines=50`);
                 if (!response.ok) throw new Error("Connection error");
@@ -495,39 +569,23 @@ HTML_CONTENT = r"""<!DOCTYPE html>
                 const data = await response.json();
                 const cleaned = cleanTerminal(data.output);
                 
-                if (cleaned.includes('class="login-card"')) {
+                if (cleaned.includes('Authentication Required')) {
                     terminalEl.innerHTML = cleaned;
                 } else {
                     terminalEl.textContent = cleaned || "Console screen is blank.";
-                    // Re-append the cursor element
                     const cursor = document.createElement('span');
                     cursor.className = 'cursor';
                     terminalEl.appendChild(cursor);
-                    
-                    // Auto scroll to bottom
                     terminalEl.scrollTop = terminalEl.scrollHeight;
                 }
-                
-                statusBadge.innerHTML = '<div class="status-dot"></div><span>Connected</span>';
-                statusBadge.style.borderColor = 'rgba(57, 255, 20, 0.2)';
-                statusBadge.style.color = '#39FF14';
             } catch (err) {
                 console.error(err);
-                statusBadge.innerHTML = '<div class="status-dot" style="background-color: var(--accent-red)"></div><span>Offline</span>';
-                statusBadge.style.borderColor = 'rgba(255, 51, 102, 0.3)';
-                statusBadge.style.color = 'var(--accent-red)';
             }
         }
 
         async function sendCommand() {
             const text = commandInput.value.trim();
-            if (!text || !userId) return;
-            
-            // History management
-            history.unshift(text);
-            if (history.length > 50) history.pop();
-            historyIndex = -1;
-
+            if (!text) return;
             commandInput.value = "";
             try {
                 await fetch('/api/sessions/send', {
@@ -542,8 +600,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         async function sendKey(key) {
-            triggerHaptic();
-            if (!userId) return;
             try {
                 await fetch('/api/sessions/key', {
                     method: 'POST',
@@ -556,9 +612,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             }
         }
 
-        async function interrupt() {
-            triggerHaptic();
-            if (!userId) return;
+        async function sendInterrupt() {
             try {
                 await fetch('/api/sessions/interrupt', {
                     method: 'POST',
@@ -572,8 +626,6 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         }
 
         async function launchAgy() {
-            triggerHaptic();
-            if (!userId) return;
             try {
                 await fetch('/api/sessions/new', {
                     method: 'POST',
@@ -591,34 +643,24 @@ HTML_CONTENT = r"""<!DOCTYPE html>
             }
         }
 
-        function navigateHistory(direction) {
-            triggerHaptic();
-            if (history.length === 0) return;
+        // Simulate dashboard metrics adjustments
+        setInterval(() => {
+            const load = (35 + Math.random() * 15).toFixed(1);
+            document.getElementById('load-fill').style.width = `${load}%`;
+            document.getElementById('load-text').textContent = `${load}%`;
             
-            historyIndex += direction;
-            if (historyIndex < -1) historyIndex = history.length - 1;
-            if (historyIndex >= history.length) historyIndex = -1;
+            const lat = Math.floor(250 + Math.random() * 80);
+            document.getElementById('latency-text').textContent = `${lat}ms`;
+        }, 3000);
 
-            if (historyIndex === -1) {
-                commandInput.value = "";
-            } else {
-                commandInput.value = history[historyIndex];
-            }
-        }
-
-        // Trigger send on enter key
         commandInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 sendCommand();
             }
         });
-        
-        btnSend.addEventListener('click', sendCommand);
 
-        if (userId) {
-            refresh();
-            setInterval(refresh, 2000);
-        }
+        refresh();
+        setInterval(refresh, 2000);
     </script>
 </body>
 </html>
