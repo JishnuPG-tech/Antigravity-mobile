@@ -201,3 +201,33 @@ async def debug_tmux():
         pass
 
     return results
+
+
+@router.get("/debug/test-run")
+async def debug_test_run():
+    import subprocess
+    import os
+    results = {}
+    
+    # 1. Check if file exists
+    path = "/usr/bin/opencode"
+    results["exists"] = os.path.exists(path)
+    if results["exists"]:
+        results["size"] = os.path.getsize(path)
+        results["executable"] = os.access(path, os.X_OK)
+    
+    # 2. Try running ls -la
+    try:
+        res = subprocess.run(["ls", "-la", path], capture_output=True, text=True, timeout=5)
+        results["ls"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["ls"] = {"error": str(e)}
+
+    # 3. Try running opencode --version
+    try:
+        res = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+        results["run"] = {"stdout": res.stdout.strip(), "stderr": res.stderr.strip(), "code": res.returncode}
+    except Exception as e:
+        results["run"] = {"error": str(e)}
+
+    return results
